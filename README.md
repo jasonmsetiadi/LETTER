@@ -18,6 +18,7 @@ accelerate
 bitsandbytes
 deepspeed
 evaluate
+k-means-constrained
 peft
 sentencepiece
 tqdm
