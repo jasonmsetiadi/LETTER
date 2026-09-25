@@ -5,13 +5,13 @@ usage() {
   cat <<'EOF'
 Usage:
   bash data_process/preprocess_item_embeddings.sh \
-    --dataset DATASET \
+    --dataset DATASET[,DATASET...] \
     [--plm-checkpoint MODEL_OR_PATH] \
     [--data-root PATH] [--gpu-id ID] [--plm-name NAME] \
     [--max-sent-len TOKENS] [--python PATH] [--overwrite]
 
-Generates item-text embeddings from <data-root>/<dataset>/<dataset>.item.json.
-The output is stored as:
+Generates item-text embeddings from each
+<data-root>/<dataset>/<dataset>.item.json. Outputs are stored as:
   <data-root>/<dataset>/<dataset>.emb-<plm-name>-td.npy
 EOF
 }
@@ -19,7 +19,7 @@ EOF
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CALLER_DIR="$(pwd)"
 DATA_ROOT="$REPO_ROOT/data"
-DATASET=""
+DATASETS=()
 PLM_CHECKPOINT="google/flan-t5-xl"
 PLM_NAME="flan-t5-xl"
 GPU_ID="0"
@@ -30,7 +30,7 @@ OVERWRITE=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dataset)
-      DATASET="$2"
+      IFS=',' read -r -a DATASETS <<<"$2"
       shift 2
       ;;
     --plm-checkpoint)
@@ -73,7 +73,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$DATASET" ]]; then
+if [[ ${#DATASETS[@]} -eq 0 ]]; then
   printf '%s\n\n' '--dataset is required.' >&2
   usage >&2
   exit 2
@@ -89,36 +89,45 @@ if [[ "$DATA_ROOT" != /* ]]; then
   DATA_ROOT="$CALLER_DIR/$DATA_ROOT"
 fi
 
-ITEM_FILE="$DATA_ROOT/$DATASET/$DATASET.item.json"
-OUTPUT_FILE="$DATA_ROOT/$DATASET/$DATASET.emb-$PLM_NAME-td.npy"
-
 if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   printf 'Python executable not found: %s\n' "$PYTHON_BIN" >&2
   exit 1
 fi
 
-if [[ ! -f "$ITEM_FILE" ]]; then
-  printf 'Processed item metadata not found: %s\n' "$ITEM_FILE" >&2
-  exit 1
-fi
+OUTPUT_FILES=()
+for dataset in "${DATASETS[@]}"; do
+  item_file="$DATA_ROOT/$dataset/$dataset.item.json"
+  output_file="$DATA_ROOT/$dataset/$dataset.emb-$PLM_NAME-td.npy"
+  if [[ ! -f "$item_file" ]]; then
+    printf 'Processed item metadata not found: %s\n' "$item_file" >&2
+    exit 1
+  fi
+  if [[ -e "$output_file" && "$OVERWRITE" != true ]]; then
+    printf 'Output already exists: %s\nUse --overwrite to replace it.\n' "$output_file" >&2
+    exit 1
+  fi
+  OUTPUT_FILES+=("$output_file")
+done
 
-if [[ -e "$OUTPUT_FILE" && "$OVERWRITE" != true ]]; then
-  printf 'Output already exists: %s\nUse --overwrite to replace it.\n' "$OUTPUT_FILE" >&2
-  exit 1
-fi
+printf 'Datasets: %s\n' "${DATASETS[*]}"
+printf 'Output files:\n'
+printf '  %s\n' "${OUTPUT_FILES[@]}"
 
 cd "$REPO_ROOT"
 "$PYTHON_BIN" data_process/amazon_text_emb.py \
-  --dataset "$DATASET" \
+  --datasets "${DATASETS[@]}" \
   --root "$DATA_ROOT" \
   --gpu_id "$GPU_ID" \
   --plm_name "$PLM_NAME" \
   --plm_checkpoint "$PLM_CHECKPOINT" \
   --max_sent_len "$MAX_SENT_LEN"
 
-if [[ ! -f "$OUTPUT_FILE" ]]; then
-  printf 'Embedding generation completed without creating: %s\n' "$OUTPUT_FILE" >&2
-  exit 1
-fi
+for output_file in "${OUTPUT_FILES[@]}"; do
+  if [[ ! -f "$output_file" ]]; then
+    printf 'Embedding generation completed without creating: %s\n' "$output_file" >&2
+    exit 1
+  fi
+done
 
-printf 'Stored item embeddings: %s\n' "$OUTPUT_FILE"
+printf 'Stored item embeddings:\n'
+printf '  %s\n' "${OUTPUT_FILES[@]}"
