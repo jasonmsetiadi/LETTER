@@ -35,13 +35,16 @@ the required `<dataset>.emb-<model>-td.npy` file from the dataset's
 ```
 bash data_process/preprocess_item_embeddings.sh \
   --dataset Instruments \
-  --plm-checkpoint /absolute/path/to/llama \
   --gpu-id 0
 ```
 
-The script writes `data/Instruments/Instruments.emb-llama-td.npy`, refuses to
-replace an existing output unless `--overwrite` is supplied, and accepts
-`--data-root`, `--plm-name`, `--max-sent-len`, and `--python` overrides.
+The default model is `google/flan-t5-xl`, loaded through its encoder-only
+`T5EncoderModel`, and the script writes
+`data/Instruments/Instruments.emb-flan-t5-xl-td.npy`. It refuses to replace an
+existing output unless `--overwrite` is supplied, and accepts `--data-root`,
+`--plm-name`, `--plm-checkpoint`, `--max-sent-len`, and `--python` overrides.
+`--plm-checkpoint` may be either an existing local model directory or a valid
+Hugging Face model ID.
 
 ### Train
 

@@ -7,7 +7,7 @@ import time
 
 import torch
 # import gensim
-from transformers import AutoModel, AutoTokenizer
+from transformers import AutoConfig, AutoModel, AutoTokenizer, T5EncoderModel
 import collections
 # import openai
 
@@ -79,13 +79,22 @@ def set_device(gpu_id):
         return torch.device(
             'cuda:' + str(gpu_id) if torch.cuda.is_available() else 'cpu')
 
-def load_plm(model_path='bert-base-uncased'):
+def load_plm(model_path='google/flan-t5-xl'):
 
     tokenizer = AutoTokenizer.from_pretrained(model_path,)
 
     print("Load Model:", model_path)
 
-    model = AutoModel.from_pretrained(model_path,low_cpu_mem_usage=True,)
+    config = AutoConfig.from_pretrained(model_path)
+    if config.model_type == "t5":
+        model = T5EncoderModel.from_pretrained(model_path, low_cpu_mem_usage=True)
+    elif config.is_encoder_decoder:
+        raise ValueError(
+            f"Unsupported encoder-decoder model type: {config.model_type}. "
+            "Use a T5-compatible encoder model or a decoder-only model."
+        )
+    else:
+        model = AutoModel.from_pretrained(model_path, low_cpu_mem_usage=True)
     return tokenizer, model
 
 def load_json(file):
@@ -234,5 +243,4 @@ amazon_text_feature3 = ['description']
 amazon_text_feature4 = ['description', 'main_cat', 'category', 'brand']
 
 amazon_text_feature5 = ['title', 'description']
-
 
