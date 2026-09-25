@@ -57,7 +57,7 @@ class VectorQuantizer(nn.Module):
         size_min = min(len(data) // (n_clusters * 2), 50) # 50 for the very first time, 10 the latter
 
         clf = KMeansConstrained(n_clusters=n_clusters, size_min=size_min, size_max=size_min * 4, max_iter=10, n_init=10,
-                                n_jobs=10, verbose=False) # 'size_min * 4' for the very first time, 'n_clusters * 4' for the latter
+                                n_jobs=1, verbose=False) # 'size_min * 4' for the very first time, 'n_clusters * 4' for the latter
         clf.fit(x)
         t_centers = torch.from_numpy(clf.cluster_centers_)
         t_labels = torch.from_numpy(clf.labels_).tolist()
@@ -211,4 +211,3 @@ class VectorQuantizer(nn.Module):
         indices = indices.view(x.shape[:-1])
 
         return x_q, loss, indices
-

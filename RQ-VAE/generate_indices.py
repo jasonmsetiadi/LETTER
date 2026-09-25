@@ -130,7 +130,7 @@ def constrained_km(data, n_clusters=10):
     x = data
     size_min = min(len(data) // (n_clusters * 2), 10)
     clf = KMeansConstrained(n_clusters=n_clusters, size_min=size_min, size_max=n_clusters * 6, max_iter=10, n_init=10,
-                            n_jobs=10, verbose=False)
+                            n_jobs=1, verbose=False)
     clf.fit(x)
     t_centers = torch.from_numpy(clf.cluster_centers_)
     t_labels = torch.from_numpy(clf.labels_).tolist()
