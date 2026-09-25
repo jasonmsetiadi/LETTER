@@ -55,8 +55,8 @@ def test(args):
 
     candidate_trie = Trie(
         [
-            [0] + tokenizer.encode(candidate)
-            for candidate in all_items
+            [0] + tokenizer.convert_tokens_to_ids(candidate) + [tokenizer.eos_token_id]
+            for candidate in test_data.get_all_item_tokens()
         ]
     )
     prefix_allowed_tokens = prefix_allowed_tokens_fn(candidate_trie)
@@ -90,7 +90,7 @@ def test(args):
                 output = model.generate(
                     input_ids=inputs["input_ids"],
                     attention_mask=inputs["attention_mask"],
-                    max_new_tokens=10,
+                    max_new_tokens=test_data.get_max_item_id_length() + 1,
                     # max_length=10,
                     prefix_allowed_tokens_fn=prefix_allowed_tokens,
                     num_beams=args.num_beams,

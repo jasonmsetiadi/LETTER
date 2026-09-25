@@ -16,6 +16,9 @@ import numpy as np
 from transformers import T5Tokenizer
 
 
+TOKEN_PATTERN = re.compile(r"<([a-z])_(\d+)>")
+
+
 class BaseDataset(Dataset):
 
     def __init__(self, args):
@@ -33,6 +36,7 @@ class BaseDataset(Dataset):
         self.new_tokens = None
         self.allowed_tokens = None
         self.all_items = None
+        self.indices_validated = False
 
 
     def _load_data(self):
@@ -45,6 +49,7 @@ class BaseDataset(Dataset):
         if self.new_tokens is not None:
             return self.new_tokens
 
+        self._ensure_valid_indices()
         self.new_tokens = set()
         for index in self.indices.values():
             for token in index:
@@ -58,11 +63,39 @@ class BaseDataset(Dataset):
         if self.all_items is not None:
             return self.all_items
 
+        self._ensure_valid_indices()
         self.all_items = set()
         for index in self.indices.values():
             self.all_items.add("".join(index))
 
         return self.all_items
+
+    def get_all_item_tokens(self):
+        self._ensure_valid_indices()
+        return [list(index) for index in self.indices.values()]
+
+    def get_max_item_id_length(self):
+        self._ensure_valid_indices()
+        return max(len(index) for index in self.indices.values())
+
+    def _ensure_valid_indices(self):
+        if self.indices_validated:
+            return
+
+        for item_id, tokens in self.indices.items():
+            if not isinstance(tokens, list) or not tokens:
+                raise ValueError(f"Item {item_id} must have a non-empty token list.")
+
+            expected_prefix = ord("a")
+            for token in tokens:
+                match = TOKEN_PATTERN.fullmatch(token)
+                if match is None or ord(match.group(1)) != expected_prefix:
+                    raise ValueError(
+                        f"Item {item_id} must use consecutive <a_*>, <b_*>, ... tokens."
+                    )
+                expected_prefix += 1
+
+        self.indices_validated = True
 
     def get_all_items_v2(self):
         if self.all_items is not None:

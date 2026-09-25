@@ -115,7 +115,7 @@ def test_ddp(args):
                         output = model.module.generate(
                             input_ids=inputs["input_ids"],
                             attention_mask=inputs["attention_mask"],
-                            max_new_tokens=10,
+                            max_new_tokens=test_data.get_max_item_id_length() + 1,
                             prefix_allowed_tokens_fn=prefix_allowed_tokens,
                             num_beams=num_beams,
                             num_return_sequences=num_beams,

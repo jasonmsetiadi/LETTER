@@ -16,6 +16,9 @@ from prompt import sft_prompt, all_prompt
 import numpy as np
 
 
+TOKEN_PATTERN = re.compile(r"<([a-z])_(\d+)>")
+
+
 class BaseDataset(Dataset):
 
     def __init__(self, args):
@@ -33,6 +36,7 @@ class BaseDataset(Dataset):
         self.new_tokens = None
         self.allowed_tokens = None
         self.all_items = None
+        self.indices_validated = False
 
 
     def _load_data(self):
@@ -45,6 +49,7 @@ class BaseDataset(Dataset):
         if self.new_tokens is not None:
             return self.new_tokens
 
+        self._ensure_valid_indices()
         self.new_tokens = set()
         for index in self.indices.values():
             for token in index:
@@ -58,33 +63,66 @@ class BaseDataset(Dataset):
         if self.all_items is not None:
             return self.all_items
 
+        self._ensure_valid_indices()
         self.all_items = set()
         for index in self.indices.values():
             self.all_items.add("".join(index))
 
         return self.all_items
 
+    def get_max_item_id_length(self):
+        self._ensure_valid_indices()
+        return max(len(index) for index in self.indices.values())
+
+    def _ensure_valid_indices(self):
+        if self.indices_validated:
+            return
+
+        for item_id, tokens in self.indices.items():
+            if not isinstance(tokens, list) or not tokens:
+                raise ValueError(f"Item {item_id} must have a non-empty token list.")
+
+            expected_prefix = ord("a")
+            for token in tokens:
+                match = TOKEN_PATTERN.fullmatch(token)
+                if match is None or ord(match.group(1)) != expected_prefix:
+                    raise ValueError(
+                        f"Item {item_id} must use consecutive <a_*>, <b_*>, ... tokens."
+                    )
+                expected_prefix += 1
+
+        self.indices_validated = True
+
     def get_prefix_allowed_tokens_fn(self, tokenizer):
-
-
+        self._ensure_valid_indices()
         if self.allowed_tokens is None:
             self.allowed_tokens = {}
             for index in self.indices.values():
-                for i, token in enumerate(index):
-                    token_id = tokenizer(token)["input_ids"][1]
-                    if i not in self.allowed_tokens.keys():
-                        self.allowed_tokens[i] = set()
-                    self.allowed_tokens[i].add(token_id)
-            self.allowed_tokens[len(self.allowed_tokens.keys())] = set([tokenizer.eos_token_id])
-        sep = tokenizer("Response:")["input_ids"][1:]
+                token_ids = tuple(tokenizer.convert_tokens_to_ids(index))
+                if tokenizer.unk_token_id in token_ids:
+                    raise ValueError("All semantic ID tokens must be added to the tokenizer.")
+                for position, token_id in enumerate(token_ids):
+                    prefix = token_ids[:position]
+                    self.allowed_tokens.setdefault(prefix, set()).add(token_id)
+                self.allowed_tokens.setdefault(token_ids, set()).add(tokenizer.eos_token_id)
+
+        sep = tokenizer("Response:", add_special_tokens=False)["input_ids"]
+        if not sep:
+            raise ValueError("Unable to tokenize the LC-Rec response marker.")
+
 
         def prefix_allowed_tokens_fn(batch_id, sentence):
             sentence = sentence.tolist()
-            reversed_sent = sentence[::-1]
-            for i in range(len(reversed_sent)):
-                if reversed_sent[i:i + len(sep)] == sep[::-1]:
-                    # print(list(self.allowed_tokens[i]))
-                    return list(self.allowed_tokens[i])
+            for start in range(len(sentence) - len(sep), -1, -1):
+                if sentence[start:start + len(sep)] == sep:
+                    generated_prefix = tuple(sentence[start + len(sep):])
+                    allowed = self.allowed_tokens.get(generated_prefix)
+                    if allowed is None:
+                        raise ValueError(
+                            f"Generated an invalid semantic-ID prefix: {generated_prefix}."
+                        )
+                    return list(allowed)
+            raise ValueError("LC-Rec response marker was not found in the generation prompt.")
 
         return prefix_allowed_tokens_fn
 

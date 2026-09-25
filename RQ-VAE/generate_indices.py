@@ -49,6 +49,24 @@ def parse_args():
     parser.add_argument('--epoch', type=int, default='10000', help='epoch')
     parser.add_argument('--checkpoint', type=str, default='epoch_9999_collision_0.0012_model.pth', help='checkpoint name')
     parser.add_argument('--beta', type=str, default='1e-4', help='div loss weight')
+    parser.add_argument(
+        '--checkpoint-path',
+        type=str,
+        default=None,
+        help='Direct path to an RQ-VAE checkpoint. Overrides --root_path and --checkpoint.',
+    )
+    parser.add_argument(
+        '--output-file',
+        type=str,
+        default=None,
+        help='Direct path for the generated item-index JSON file.',
+    )
+    parser.add_argument(
+        '--device',
+        type=str,
+        default='cuda:0',
+        help='Device used to generate semantic IDs.',
+    )
 
 
     return parser.parse_args()
@@ -56,12 +74,20 @@ def parse_args():
 args_setting = parse_args()
 
 dataset = args_setting.dataset
-ckpt_path = args_setting.root_path + f'alpha{args_setting.alpha}-beta{args_setting.beta}/'+args_setting.checkpoint
+ckpt_path = args_setting.checkpoint_path or (
+    args_setting.root_path
+    + f'alpha{args_setting.alpha}-beta{args_setting.beta}/'
+    + args_setting.checkpoint
+)
 
 output_dir = f"./data/{dataset}/"
-output_file = f"{dataset}.index.epoch{args_setting.epoch}.alpha{args_setting.alpha}-beta{args_setting.beta}.json"
-output_file = os.path.join(output_dir,output_file)
-device = torch.device("cuda:0")
+output_file = args_setting.output_file or os.path.join(
+    output_dir,
+    f"{dataset}.index.epoch{args_setting.epoch}.alpha{args_setting.alpha}-beta{args_setting.beta}.json",
+)
+output_dir = os.path.dirname(output_file)
+os.makedirs(output_dir, exist_ok=True)
+device = torch.device(args_setting.device)
 
 ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'))
 args = ckpt["args"]
