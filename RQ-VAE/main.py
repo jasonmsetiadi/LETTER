@@ -4,7 +4,6 @@ import torch
 import numpy as np
 from time import time
 import logging
-import wandb
 from torch.utils.data import DataLoader
 
 from datasets import EmbDataset
@@ -97,7 +96,6 @@ if __name__ == '__main__':
 
     print("Best Loss",best_loss)
     print("Best Collision Rate", best_collision_rate)
-
 
 
 

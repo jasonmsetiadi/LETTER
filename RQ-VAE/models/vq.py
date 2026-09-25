@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from .layers import kmeans, sinkhorn_algorithm
 import random
-import wandb
 
 
 class VectorQuantizer(nn.Module):
@@ -212,5 +211,4 @@ class VectorQuantizer(nn.Module):
         indices = indices.view(x.shape[:-1])
 
         return x_q, loss, indices
-
 

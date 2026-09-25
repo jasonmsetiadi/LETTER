@@ -10,7 +10,6 @@ from tqdm import tqdm
 import torch.nn.functional as F
 from utils import ensure_dir,set_color,get_local_time
 import os
-import wandb
 from datasets import EmbDataset
 from torch.utils.data import DataLoader
 
@@ -278,7 +277,6 @@ class Trainer(object):
 
 
         return self.best_loss, self.best_collision_rate
-
 
 
 
