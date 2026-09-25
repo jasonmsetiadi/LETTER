@@ -108,13 +108,6 @@ def generate_item_embedding(args, item_text_list, tokenizer, model, word_drop_ra
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='Instruments', help='Instruments / Arts / Games')
-    parser.add_argument(
-        '--datasets',
-        type=str,
-        nargs='+',
-        default=None,
-        help='Datasets to process with one loaded embedding model.',
-    )
     parser.add_argument('--root', type=str, default="")
     parser.add_argument('--gpu_id', type=int, default=2, help='ID of running GPU')
     parser.add_argument('--plm_name', type=str, default='flan-t5-xl')
@@ -127,11 +120,12 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    datasets = args.datasets or [args.dataset]
-    data_root = args.root
+    args.root = os.path.join(args.root, args.dataset)
 
     device = set_device(args.gpu_id)
     args.device = device
+
+    item_text_list = preprocess_text(args)
 
     plm_tokenizer, plm_model = load_plm(args.plm_checkpoint)
     if plm_tokenizer.pad_token_id is None:
@@ -139,14 +133,6 @@ if __name__ == '__main__':
     plm_model = plm_model.to(device)
     plm_model.eval()
 
-    for dataset in datasets:
-        args.dataset = dataset
-        args.root = os.path.join(data_root, dataset)
-        item_text_list = preprocess_text(args)
-        generate_item_embedding(
-            args,
-            item_text_list,
-            plm_tokenizer,
-            plm_model,
-            word_drop_ratio=args.word_drop_ratio,
-        )
+    generate_item_embedding(args, item_text_list,plm_tokenizer,
+                            plm_model, word_drop_ratio=args.word_drop_ratio)
+

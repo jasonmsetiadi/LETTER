@@ -45,8 +45,6 @@ existing output unless `--overwrite` is supplied, and accepts `--data-root`,
 `--plm-name`, `--plm-checkpoint`, `--max-sent-len`, and `--python` overrides.
 `--plm-checkpoint` may be either an existing local model directory or a valid
 Hugging Face model ID.
-Pass comma-separated values after `--dataset` to reuse one loaded model, for
-example `--dataset Instruments,Beauty,Yelp`.
 
 ### Train
 
