@@ -2,18 +2,14 @@
 
 import argparse
 import json
-import random
 from collections import defaultdict
 from pathlib import Path
 
 
-def truncate_indices(indices, min_length, max_length, seed):
+def truncate_indices(indices, min_length=1, max_length=4, allow_base_collisions=True):
+    """Truncate each item to its shortest prefix that is unique across the catalog."""
     if not 1 <= min_length <= max_length:
         raise ValueError("Lengths must satisfy 1 <= min_length <= max_length.")
-
-    rng = random.Random(seed)
-    truncated = {}
-    lengths = {}
 
     for item_id, tokens in indices.items():
         if not isinstance(tokens, list) or not tokens:
@@ -22,41 +18,54 @@ def truncate_indices(indices, min_length, max_length, seed):
             raise ValueError(
                 f"Item {item_id} has {len(tokens)} tokens, fewer than max_length={max_length}."
             )
-        length = rng.randint(min_length, max_length)
-        truncated[item_id] = tokens[:length]
-        lengths[item_id] = length
 
-    while True:
-        collisions = defaultdict(list)
-        for item_id, tokens in truncated.items():
-            collisions[tuple(tokens)].append(item_id)
+    prefix_counts = {l: defaultdict(int) for l in range(1, max_length + 1)}
+    for tokens in indices.values():
+        for l in range(1, max_length + 1):
+            prefix_counts[l][tuple(tokens[:l])] += 1
 
-        duplicate_groups = [group for group in collisions.values() if len(group) > 1]
-        if not duplicate_groups:
-            return truncated, lengths
+    truncated = {}
+    lengths = {}
 
-        changed = False
-        for group in duplicate_groups:
-            for item_id in group:
-                if lengths[item_id] < max_length:
-                    lengths[item_id] += 1
-                    truncated[item_id] = indices[item_id][:lengths[item_id]]
-                    changed = True
-        if not changed:
-            raise ValueError(
-                "The selected maximum length cannot produce unique semantic IDs."
-            )
+    for item_id, tokens in indices.items():
+        chosen_len = max_length
+        for l in range(min_length, max_length):
+            if prefix_counts[l][tuple(tokens[:l])] == 1:
+                chosen_len = l
+                break
+
+        if chosen_len == max_length and not allow_base_collisions:
+            if prefix_counts[max_length][tuple(tokens[:max_length])] > 1:
+                raise ValueError(
+                    "The selected maximum length cannot produce unique semantic IDs."
+                )
+
+        truncated[item_id] = tokens[:chosen_len]
+        lengths[item_id] = chosen_len
+
+    return truncated, lengths
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Randomly truncate fixed-length LETTER IDs into variable-length IDs."
+        description="Truncate fixed-length LETTER IDs into collision-free variable-length IDs."
     )
     parser.add_argument("--input", required=True, help="Input .index.json file.")
     parser.add_argument("--output", required=True, help="Output variable-length .index.json file.")
     parser.add_argument("--min-length", type=int, default=1)
     parser.add_argument("--max-length", type=int, required=True)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--allow-base-collisions",
+        action="store_true",
+        default=True,
+        help="Allow inherent collisions that already exist in the input index at max_length (default: True).",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_false",
+        dest="allow_base_collisions",
+        help="Disallow any collisions and raise an error if unique IDs cannot be produced.",
+    )
     args = parser.parse_args()
 
     input_path = Path(args.input)
@@ -65,22 +74,29 @@ def main():
         indices = json.load(input_file)
 
     truncated, lengths = truncate_indices(
-        indices, args.min_length, args.max_length, args.seed
+        indices,
+        min_length=args.min_length,
+        max_length=args.max_length,
+        allow_base_collisions=args.allow_base_collisions,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as output_file:
         json.dump(truncated, output_file)
 
+    unique_truncated = len({tuple(v) for v in truncated.values()})
+    unique_base = len({tuple(v[:args.max_length]) for v in indices.values()})
     summary_path = output_path.with_suffix(".summary.json")
     with summary_path.open("w", encoding="utf-8") as summary_file:
         json.dump(
             {
                 "input": str(input_path),
-                "seed": args.seed,
                 "items": len(truncated),
                 "min_length": min(lengths.values()),
                 "max_length": max(lengths.values()),
                 "mean_length": sum(lengths.values()) / len(lengths),
+                "unique_ids": unique_truncated,
+                "collisions": len(truncated) - unique_truncated,
+                "base_collisions": len(indices) - unique_base,
             },
             summary_file,
             indent=2,

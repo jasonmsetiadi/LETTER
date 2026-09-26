@@ -75,8 +75,10 @@ python RQ-VAE/truncate_indices.py \
   --max-length 4
 ```
 
-This utility requires the input IDs to be unique at the selected maximum
-length; regenerate or otherwise resolve fixed-ID collisions before truncating.
+This utility uses the Shortest Unique Prefix (SUP) method, which finds the minimal
+prefix length per item that uniquely distinguishes it in the catalog Trie without adding
+new collisions. Inherent base collisions present in the input index at the maximum
+length are preserved rather than causing failure (use `--strict` to disallow).
 
 Train and evaluate with the resulting index file. LETTER-TIGER constrains
 generation with a catalog trie; LETTER-LC-Rec does the same after the response
@@ -122,9 +124,8 @@ bash run_variable_length_pipeline.sh --dataset Instruments
 
 It writes `data/Instruments/Instruments.index.varlen.json` and trains TIGER
 with it. Use `--models tiger,lcrec --base-model /absolute/path/to/llama` to run
-both downstream models. The fixed index produced for truncation must contain
-no duplicate complete IDs; the runner stops with an error if that condition is
-not met instead of creating an ambiguous variable-length mapping.
+both downstream models. Truncation defaults to the smart `shortest_unique` strategy,
+preserving minimal unique prefix paths without adding collisions.
 
 ### LETTER-TIGER
 

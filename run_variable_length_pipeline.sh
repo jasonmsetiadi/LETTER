@@ -26,7 +26,6 @@ Options:
   --beta VALUE                 Diversity-loss weight (default: 0.0001)
   --min-length COUNT           Minimum SID length (default: 1)
   --max-length COUNT           Maximum SID length (default: 4)
-  --seed VALUE                 Truncation seed (default: 42)
   --index-name NAME            Variable index filename (default: <dataset>.index.varlen.json)
   --overwrite-index            Replace an existing variable index
   --models LIST                Comma-separated: tiger,lcrec (default: tiger)
@@ -80,7 +79,6 @@ ALPHA="0.01"
 BETA="0.0001"
 MIN_LENGTH="1"
 MAX_LENGTH="4"
-SEED="42"
 INDEX_NAME=""
 MODELS="tiger"
 BASE_MODEL=""
@@ -105,7 +103,6 @@ while [[ $# -gt 0 ]]; do
     --beta) BETA="$2"; shift 2 ;;
     --min-length) MIN_LENGTH="$2"; shift 2 ;;
     --max-length) MAX_LENGTH="$2"; shift 2 ;;
-    --seed) SEED="$2"; shift 2 ;;
     --index-name) INDEX_NAME="$2"; shift 2 ;;
     --models) MODELS="$2"; shift 2 ;;
     --base-model) BASE_MODEL="$2"; shift 2 ;;
@@ -245,8 +242,7 @@ STEP_START="$SECONDS"
   --input "$FIXED_INDEX_FILE" \
   --output "$INDEX_FILE" \
   --min-length "$MIN_LENGTH" \
-  --max-length "$MAX_LENGTH" \
-  --seed "$SEED"
+  --max-length "$MAX_LENGTH"
 
 if [[ ! -f "$INDEX_FILE" ]]; then
   printf 'Variable-length index generation completed without creating: %s\n' "$INDEX_FILE" >&2
