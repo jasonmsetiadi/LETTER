@@ -29,8 +29,8 @@ Options:
   --tokenizer-only             Stop after fixed-length index generation
   --models LIST                Comma-separated: tiger,lcrec (default: tiger)
   --base-model PATH            Required when selecting lcrec
-  --tiger-gpus IDS             CUDA devices for TIGER (default: 0,1)
-  --lcrec-gpus IDS             CUDA devices for LC-Rec (default: 0,1,2,3)
+  --tiger-gpus IDS             CUDA devices for TIGER (default: autodetect, up to 2)
+  --lcrec-gpus IDS             CUDA devices for LC-Rec (default: autodetect, up to 4)
   --skip-evaluation            Train selected recommenders without evaluation
   --python PATH                Python executable (default: python3)
   -h, --help                   Show this help
@@ -79,8 +79,8 @@ BETA="0.0001"
 INDEX_NAME=""
 MODELS="tiger"
 BASE_MODEL=""
-TIGER_GPUS="0,1"
-LCREC_GPUS="0,1,2,3"
+TIGER_GPUS=""
+LCREC_GPUS=""
 SKIP_EVALUATION=false
 OVERWRITE_INDEX=false
 TOKENIZER_ONLY=false
@@ -175,6 +175,26 @@ fi
 gpu_count() {
   awk -F',' '{ print NF }' <<<"$1"
 }
+
+detect_available_gpus() {
+  local max_count="$1"
+  "$PYTHON_BIN" -c "
+import torch
+count = torch.cuda.device_count()
+if count > 0:
+    limit = min(count, $max_count)
+    print(','.join(str(i) for i in range(limit)))
+else:
+    print('0')
+" 2>/dev/null || echo "0"
+}
+
+if [[ -z "$TIGER_GPUS" ]]; then
+  TIGER_GPUS="$(detect_available_gpus 2)"
+fi
+if [[ -z "$LCREC_GPUS" ]]; then
+  LCREC_GPUS="$(detect_available_gpus 4)"
+fi
 
 find_latest_checkpoint() {
   local root="$1"

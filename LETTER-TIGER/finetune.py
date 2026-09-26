@@ -1,7 +1,5 @@
 import argparse
 import os
-
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 import sys
 from typing import List
 from transformers import EarlyStoppingCallback
