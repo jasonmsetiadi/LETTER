@@ -116,13 +116,13 @@ class BaseDataset(Dataset):
             for start in range(len(sentence) - len(sep), -1, -1):
                 if sentence[start:start + len(sep)] == sep:
                     generated_prefix = tuple(sentence[start + len(sep):])
+                    if tokenizer.eos_token_id in generated_prefix:
+                        return [tokenizer.eos_token_id]
                     allowed = self.allowed_tokens.get(generated_prefix)
-                    if allowed is None:
-                        raise ValueError(
-                            f"Generated an invalid semantic-ID prefix: {generated_prefix}."
-                        )
+                    if not allowed:
+                        return [tokenizer.eos_token_id]
                     return list(allowed)
-            raise ValueError("LC-Rec response marker was not found in the generation prompt.")
+            return [tokenizer.eos_token_id]
 
         return prefix_allowed_tokens_fn
 

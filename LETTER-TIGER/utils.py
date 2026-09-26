@@ -158,10 +158,14 @@ def load_test_dataset(args):
 
     return test_data
 
-def prefix_allowed_tokens_fn(candidate_trie):
+def prefix_allowed_tokens_fn(candidate_trie, eos_token_id=1):
     def prefix_allowed_tokens(batch_id, sentence):
         sentence = sentence.tolist()
+        if eos_token_id in sentence:
+            return [eos_token_id]
         trie_out = candidate_trie.get(sentence)
+        if not trie_out:
+            return [eos_token_id]
         return trie_out
 
     return prefix_allowed_tokens

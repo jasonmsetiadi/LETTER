@@ -123,11 +123,14 @@ class BaseDataset(Dataset):
 
         def prefix_allowed_tokens_fn(batch_id, sentence):
             sentence = sentence.tolist()
+            if tokenizer.eos_token_id in sentence:
+                return [tokenizer.eos_token_id]
             reversed_sent = sentence[::-1]
             for i in range(len(reversed_sent)):
                 if reversed_sent[i:i + len(sep)] == sep[::-1]:
-                    # print(list(self.allowed_tokens[i]))
-                    return list(self.allowed_tokens[i])
+                    tokens = list(self.allowed_tokens.get(i, [tokenizer.eos_token_id]))
+                    return tokens if tokens else [tokenizer.eos_token_id]
+            return [tokenizer.eos_token_id]
 
         return prefix_allowed_tokens_fn
 

@@ -58,7 +58,7 @@ def test(args):
             for candidate in test_data.get_all_item_tokens()
         ]
     )
-    prefix_allowed_tokens = prefix_allowed_tokens_fn(candidate_trie)
+    prefix_allowed_tokens = prefix_allowed_tokens_fn(candidate_trie, tokenizer.eos_token_id)
 
     test_loader = DataLoader(test_data, batch_size=args.test_batch_size, collate_fn=collator,
                              shuffle=True, num_workers=4, pin_memory=True)
