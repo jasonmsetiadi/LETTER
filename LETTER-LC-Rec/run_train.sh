@@ -3,7 +3,7 @@ export CUDA_LAUNCH_BLOCKING=1
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 DATASET=Instruments
-BASE_MODEL= # LLaMA
+BASE_MODEL=${BASE_MODEL:-huggyllama/llama-7b}
 DATA_PATH=../data
 OUTPUT_DIR=./ckpt/$DATASET/
 

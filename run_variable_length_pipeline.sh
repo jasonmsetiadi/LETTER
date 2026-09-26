@@ -30,7 +30,7 @@ Options:
   --overwrite-index            Replace an existing variable index
   --tokenizer-only             Stop after variable-length index generation
   --models LIST                Comma-separated: tiger,lcrec (default: tiger)
-  --base-model PATH            Required when selecting lcrec
+  --base-model PATH            Base model for LC-Rec (default: huggyllama/llama-7b)
   --tiger-gpus IDS             CUDA devices for TIGER (default: autodetect, up to 2)
   --lcrec-gpus IDS             CUDA devices for LC-Rec (default: autodetect, up to 4)
   --skip-evaluation            Train selected recommenders without evaluation
@@ -82,7 +82,7 @@ MIN_LENGTH="1"
 MAX_LENGTH="4"
 INDEX_NAME=""
 MODELS="tiger"
-BASE_MODEL=""
+BASE_MODEL="${BASE_MODEL:-huggyllama/llama-7b}"
 TIGER_GPUS=""
 LCREC_GPUS=""
 SKIP_EVALUATION=false
@@ -135,6 +135,9 @@ if [[ -n "$CF_EMBEDDING" && "$CF_EMBEDDING" != /* ]]; then
 fi
 if [[ -n "$RQ_CHECKPOINT" && "$RQ_CHECKPOINT" != /* ]]; then
   RQ_CHECKPOINT="$CALLER_DIR/$RQ_CHECKPOINT"
+fi
+if [[ -n "$BASE_MODEL" && -d "$CALLER_DIR/$BASE_MODEL" ]]; then
+  BASE_MODEL="$CALLER_DIR/$BASE_MODEL"
 fi
 if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   printf 'Python executable not found: %s\n' "$PYTHON_BIN" >&2

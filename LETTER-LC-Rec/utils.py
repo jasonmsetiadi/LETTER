@@ -16,7 +16,7 @@ def parse_global_args(parser):
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
     parser.add_argument("--base_model", type=str,
-                        default="./llama-7b/",
+                        default="huggyllama/llama-7b",
                         help="basic model path")
     parser.add_argument("--output_dir", type=str,
                         default="./ckpt/",

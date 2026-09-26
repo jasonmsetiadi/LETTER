@@ -6,7 +6,7 @@ DATASET=Instruments
 DATA_PATH=../data
 OUTPUT_DIR=./ckpt/$DATASET/
 RESULTS_FILE=./results/$DATASET/ddp.json
-BASE_MODEL= # LLaMA
+BASE_MODEL=${BASE_MODEL:-huggyllama/llama-7b}
 
 torchrun --nproc_per_node=4 --master_port=4324 test_ddp.py \
     --ckpt_path  \
