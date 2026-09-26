@@ -86,7 +86,7 @@ def train(args):
             logging_steps=args.logging_step,
             optim=args.optim,
             # gradient_checkpointing=gradient_checkpointing,
-            evaluation_strategy=args.save_and_eval_strategy,
+            eval_strategy=args.save_and_eval_strategy,
             save_strategy=args.save_and_eval_strategy,
             eval_steps=args.save_and_eval_steps,
             save_steps=args.save_and_eval_steps,
@@ -96,11 +96,11 @@ def train(args):
             # deepspeed=args.deepspeed,
             ddp_find_unused_parameters=False if ddp else None,
             # report_to=['wandb'],
-            eval_delay= 1 if args.save_and_eval_strategy=="epoch" else 2000,
+            eval_delay=1 if args.save_and_eval_strategy == "epoch" else 2000,
         ),
         tokenizer=tokenizer,
         data_collator=collator,
-        callbacks = [EarlyStoppingCallback(early_stopping_patience=20)]
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=20)],
     )
     model.config.use_cache = False
 
