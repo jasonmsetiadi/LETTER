@@ -95,7 +95,7 @@ def train(args):
             load_best_model_at_end=True,
             # deepspeed=args.deepspeed,
             ddp_find_unused_parameters=False if ddp else None,
-            # report_to=['wandb'],
+            report_to="none",
             eval_delay=1 if args.save_and_eval_strategy == "epoch" else 2000,
         ),
         tokenizer=tokenizer,
