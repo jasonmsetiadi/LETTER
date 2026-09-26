@@ -91,7 +91,10 @@ def train(args):
         if os.path.exists(checkpoint_name):
             if local_rank == 0:
                 print(f"Restarting from {checkpoint_name}")
-            adapters_weights = torch.load(checkpoint_name)
+            try:
+                adapters_weights = torch.load(checkpoint_name, weights_only=False)
+            except TypeError:
+                adapters_weights = torch.load(checkpoint_name)
             set_peft_model_state_dict(model, adapters_weights)
         else:
             if local_rank == 0:

@@ -17,7 +17,8 @@ Options:
   --data-root PATH             Dataset directory parent (default: <repo>/data)
   --embedding-file PATH        Item embedding .npy path
   --cf-embedding PATH          Collaborative-filtering embedding .pt path
-  --rqvae-checkpoint PATH      Reuse an existing RQ-VAE checkpoint
+  --rqvae-checkpoint PATH      Reuse an existing RQ-VAE checkpoint (autodetected if omitted)
+  --retrain-rqvae              Force training RQ-VAE even if a checkpoint exists
   --rqvae-epochs COUNT         RQ-VAE epochs (default: 10000)
   --rqvae-eval-step COUNT      RQ-VAE validation interval (default: 2000)
   --rqvae-device DEVICE        RQ-VAE device (default: cuda:0)
@@ -69,6 +70,7 @@ DATA_ROOT="$REPO_ROOT/data"
 EMBEDDING_FILE=""
 CF_EMBEDDING=""
 RQ_CHECKPOINT=""
+RETRAIN_RQVAE=false
 RQ_EPOCHS="10000"
 RQ_EVAL_STEP="2000"
 RQ_DEVICE="cuda:0"
@@ -91,6 +93,7 @@ while [[ $# -gt 0 ]]; do
     --embedding-file) EMBEDDING_FILE="$2"; shift 2 ;;
     --cf-embedding) CF_EMBEDDING="$2"; shift 2 ;;
     --rqvae-checkpoint) RQ_CHECKPOINT="$2"; shift 2 ;;
+    --retrain-rqvae) RETRAIN_RQVAE=true; shift ;;
     --rqvae-epochs) RQ_EPOCHS="$2"; shift 2 ;;
     --rqvae-eval-step) RQ_EVAL_STEP="$2"; shift 2 ;;
     --rqvae-device) RQ_DEVICE="$2"; shift 2 ;;
@@ -173,6 +176,32 @@ gpu_count() {
   awk -F',' '{ print NF }' <<<"$1"
 }
 
+find_latest_checkpoint() {
+  local root="$1"
+  if [[ ! -d "$root" ]]; then
+    return 0
+  fi
+  "$PYTHON_BIN" -c '
+import sys, glob, os
+root = sys.argv[1]
+candidates = glob.glob(os.path.join(root, "**", "best_collision_model.pth"), recursive=True)
+if not candidates:
+    candidates = glob.glob(os.path.join(root, "**", "best_loss_model.pth"), recursive=True)
+if candidates:
+    print(max(candidates, key=os.path.getmtime))
+' "$root" 2>/dev/null || true
+}
+
+DETECTED_CKPT=""
+if [[ -z "$RQ_CHECKPOINT" && "$RETRAIN_RQVAE" != true ]]; then
+  DETECTED_CKPT="$(find_latest_checkpoint "$RQ_CHECKPOINT_ROOT")"
+  if [[ -n "$DETECTED_CKPT" && -f "$DETECTED_CKPT" ]]; then
+    RQ_CHECKPOINT="$DETECTED_CKPT"
+    printf '\n[RQ-VAE] Autodetected existing checkpoint: %s\n' "$RQ_CHECKPOINT"
+    printf '[RQ-VAE] Reusing existing checkpoint (pass --retrain-rqvae to force training).\n'
+  fi
+fi
+
 if [[ -z "$RQ_CHECKPOINT" ]]; then
   printf '\n[RQ-VAE] Training the tokenizer...\n'
   STEP_START="$SECONDS"
@@ -187,7 +216,7 @@ if [[ -z "$RQ_CHECKPOINT" ]]; then
     --eval_step "$RQ_EVAL_STEP" \
     --ckpt_dir "$RQ_CHECKPOINT_ROOT"
 
-  RQ_CHECKPOINT="$(find "$RQ_CHECKPOINT_ROOT" -type f -name best_collision_model.pth | sort | tail -n 1)"
+  RQ_CHECKPOINT="$(find_latest_checkpoint "$RQ_CHECKPOINT_ROOT")"
   if [[ -z "$RQ_CHECKPOINT" ]]; then
     printf 'RQ-VAE training completed without a best_collision_model.pth checkpoint.\n' >&2
     exit 1
@@ -196,7 +225,9 @@ if [[ -z "$RQ_CHECKPOINT" ]]; then
   record_phase "RQ-VAE training" "$((SECONDS - STEP_START))"
   printf 'Stored RQ-VAE checkpoint: %s\n' "$RQ_CHECKPOINT"
 else
-  printf '\n[RQ-VAE] Reusing checkpoint: %s\n' "$RQ_CHECKPOINT"
+  if [[ "$DETECTED_CKPT" != "$RQ_CHECKPOINT" ]]; then
+    printf '\n[RQ-VAE] Reusing checkpoint: %s\n' "$RQ_CHECKPOINT"
+  fi
 fi
 if [[ ! -f "$RQ_CHECKPOINT" ]]; then
   printf 'RQ-VAE checkpoint not found: %s\n' "$RQ_CHECKPOINT" >&2

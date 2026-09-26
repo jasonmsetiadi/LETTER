@@ -89,7 +89,10 @@ output_dir = os.path.dirname(output_file)
 os.makedirs(output_dir, exist_ok=True)
 device = torch.device(args_setting.device)
 
-ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'))
+try:
+    ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'), weights_only=False)
+except TypeError:
+    ckpt = torch.load(ckpt_path, map_location=torch.device('cpu'))
 args = ckpt["args"]
 state_dict = ckpt["state_dict"]
 

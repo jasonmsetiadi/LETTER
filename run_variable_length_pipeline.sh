@@ -17,7 +17,8 @@ Options:
   --data-root PATH             Dataset directory parent (default: <repo>/data)
   --embedding-file PATH        Item embedding .npy path
   --cf-embedding PATH          Collaborative-filtering embedding .pt path
-  --rqvae-checkpoint PATH      Reuse an existing RQ-VAE checkpoint
+  --rqvae-checkpoint PATH      Reuse an existing RQ-VAE checkpoint (autodetected if omitted)
+  --retrain-rqvae              Force training RQ-VAE even if a checkpoint exists
   --rqvae-epochs COUNT         RQ-VAE epochs (default: 10000)
   --rqvae-eval-step COUNT      RQ-VAE validation interval (default: 2000)
   --rqvae-device DEVICE        RQ-VAE device (default: cuda:0)
@@ -71,6 +72,7 @@ DATA_ROOT="$REPO_ROOT/data"
 EMBEDDING_FILE=""
 CF_EMBEDDING=""
 RQ_CHECKPOINT=""
+RETRAIN_RQVAE=false
 RQ_EPOCHS="10000"
 RQ_EVAL_STEP="2000"
 RQ_DEVICE="cuda:0"
@@ -95,6 +97,7 @@ while [[ $# -gt 0 ]]; do
     --embedding-file) EMBEDDING_FILE="$2"; shift 2 ;;
     --cf-embedding) CF_EMBEDDING="$2"; shift 2 ;;
     --rqvae-checkpoint) RQ_CHECKPOINT="$2"; shift 2 ;;
+    --retrain-rqvae) RETRAIN_RQVAE=true; shift ;;
     --rqvae-epochs) RQ_EPOCHS="$2"; shift 2 ;;
     --rqvae-eval-step) RQ_EVAL_STEP="$2"; shift 2 ;;
     --rqvae-device) RQ_DEVICE="$2"; shift 2 ;;
@@ -170,6 +173,33 @@ gpu_count() {
   awk -F',' '{ print NF }' <<<"$1"
 }
 
+RQ_CHECKPOINT_ROOT="$REPO_ROOT/checkpoint/$DATASET"
+
+find_latest_checkpoint() {
+  local root="$1"
+  if [[ ! -d "$root" ]]; then
+    return 0
+  fi
+  "$PYTHON_BIN" -c '
+import sys, glob, os
+root = sys.argv[1]
+candidates = glob.glob(os.path.join(root, "**", "best_collision_model.pth"), recursive=True)
+if not candidates:
+    candidates = glob.glob(os.path.join(root, "**", "best_loss_model.pth"), recursive=True)
+if candidates:
+    print(max(candidates, key=os.path.getmtime))
+' "$root" 2>/dev/null || true
+}
+
+if [[ -z "$RQ_CHECKPOINT" && "$RETRAIN_RQVAE" != true ]]; then
+  DETECTED_CKPT="$(find_latest_checkpoint "$RQ_CHECKPOINT_ROOT")"
+  if [[ -n "$DETECTED_CKPT" && -f "$DETECTED_CKPT" ]]; then
+    RQ_CHECKPOINT="$DETECTED_CKPT"
+    printf '\n[RQ-VAE] Autodetected existing checkpoint: %s\n' "$RQ_CHECKPOINT"
+    printf '[RQ-VAE] Reusing existing checkpoint (pass --retrain-rqvae to force training).\n'
+  fi
+fi
+
 fixed_args=(
   --dataset "$DATASET"
   --data-root "$DATA_ROOT"
@@ -184,6 +214,9 @@ fixed_args=(
   --tokenizer-only
   --python "$PYTHON_BIN"
 )
+if [[ "$RETRAIN_RQVAE" == true ]]; then
+  fixed_args+=(--retrain-rqvae)
+fi
 if [[ -n "$EMBEDDING_FILE" ]]; then
   fixed_args+=(--embedding-file "$EMBEDDING_FILE")
 fi
@@ -194,12 +227,17 @@ if [[ -n "$RQ_CHECKPOINT" ]]; then
   fixed_args+=(--rqvae-checkpoint "$RQ_CHECKPOINT")
 fi
 
-printf '\n[Fixed index] Training or reusing RQ-VAE and generating a fixed index...\n'
-STEP_START="$SECONDS"
-bash "$REPO_ROOT/run_fixed_length_pipeline.sh" "${fixed_args[@]}"
-printf 'Completed fixed-index preparation in %s.\n' "$(format_duration "$((SECONDS - STEP_START))")"
-record_phase "Fixed-index preparation" "$((SECONDS - STEP_START))"
-printf 'Stored intermediate fixed-length index: %s\n' "$FIXED_INDEX_FILE"
+if [[ -f "$FIXED_INDEX_FILE" && "$OVERWRITE_INDEX" != true && "$RETRAIN_RQVAE" != true ]]; then
+  printf '\n[Fixed index] Found existing intermediate index: %s\n' "$FIXED_INDEX_FILE"
+  printf '[Fixed index] Reusing existing fixed index (pass --overwrite-index to regenerate).\n'
+else
+  printf '\n[Fixed index] Training or reusing RQ-VAE and generating a fixed index...\n'
+  STEP_START="$SECONDS"
+  bash "$REPO_ROOT/run_fixed_length_pipeline.sh" "${fixed_args[@]}"
+  printf 'Completed fixed-index preparation in %s.\n' "$(format_duration "$((SECONDS - STEP_START))")"
+  record_phase "Fixed-index preparation" "$((SECONDS - STEP_START))"
+  printf 'Stored intermediate fixed-length index: %s\n' "$FIXED_INDEX_FILE"
+fi
 
 printf '\n[Variable index] Creating the variable-length item index...\n'
 STEP_START="$SECONDS"

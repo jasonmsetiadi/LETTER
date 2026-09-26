@@ -64,7 +64,10 @@ if __name__ == '__main__':
 
     print(args)
     logging.basicConfig(level=logging.DEBUG)
-    cf_emb = torch.load(args.cf_emb).squeeze().detach().numpy()
+    try:
+        cf_emb = torch.load(args.cf_emb, weights_only=False).squeeze().detach().numpy()
+    except TypeError:
+        cf_emb = torch.load(args.cf_emb).squeeze().detach().numpy()
 
     """build dataset"""
     data = EmbDataset(args.data_path)
