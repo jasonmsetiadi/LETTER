@@ -29,7 +29,7 @@ def parse_args():
     parser.add_argument("--loss_type", type=str, default="mse", help="loss_type")
     parser.add_argument("--kmeans_init", type=bool, default=True, help="use kmeans_init or not")
     parser.add_argument("--kmeans_iters", type=int, default=100, help="max kmeans iters")
-    parser.add_argument('--sk_epsilons', type=float, nargs='+', default=[0.0, 0.0, 0.0, 0.003], help="sinkhorn epsilons")
+    parser.add_argument('--sk_epsilons', type=float, nargs='+', default=None, help="sinkhorn epsilons")
     parser.add_argument("--sk_iters", type=int, default=50, help="max sinkhorn iters")
 
     parser.add_argument("--device", type=str, default="cuda:4", help="gpu or cpu")
@@ -47,7 +47,14 @@ def parse_args():
 
     parser.add_argument("--ckpt_dir", type=str, default="../checkpoint", help="output directory for model")
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.sk_epsilons is None:
+        args.sk_epsilons = [0.0] * (len(args.num_emb_list) - 1) + [0.003]
+    elif len(args.sk_epsilons) != len(args.num_emb_list):
+        raise ValueError(
+            f"len(sk_epsilons) ({len(args.sk_epsilons)}) must match len(num_emb_list) ({len(args.num_emb_list)})"
+        )
+    return args
 
 
 if __name__ == '__main__':

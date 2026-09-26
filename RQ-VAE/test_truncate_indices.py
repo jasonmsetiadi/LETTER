@@ -59,6 +59,23 @@ class TruncateIndicesTest(unittest.TestCase):
         self.assertEqual(truncated["2"], ["<a_1>", "<b_2>"])
         self.assertEqual(lengths, {"0": 2, "1": 2, "2": 2})
 
+    def test_longer_indices_truncation(self):
+        indices = {
+            "0": ["<a_1>", "<b_1>", "<c_1>", "<d_1>", "<e_1>"],
+            "1": ["<a_1>", "<b_1>", "<c_1>", "<d_1>", "<e_2>"],
+            "2": ["<a_1>", "<b_2>", "<c_1>", "<d_1>", "<e_1>"],
+        }
+        truncated, lengths = truncate_indices_module.truncate_indices(
+            indices, min_length=1, max_length=5
+        )
+        self.assertEqual(truncated["0"], ["<a_1>", "<b_1>", "<c_1>", "<d_1>", "<e_1>"])
+        self.assertEqual(lengths["0"], 5)
+        self.assertEqual(truncated["1"], ["<a_1>", "<b_1>", "<c_1>", "<d_1>", "<e_2>"])
+        self.assertEqual(lengths["1"], 5)
+        self.assertEqual(truncated["2"], ["<a_1>", "<b_2>"])
+        self.assertEqual(lengths["2"], 2)
+
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -31,7 +31,7 @@ class Trainer(object):
         saved_model_dir = "{}".format(get_local_time())
         self.ckpt_dir = os.path.join(self.ckpt_dir,saved_model_dir)
         ensure_dir(self.ckpt_dir)
-        self.labels = {"0":[],"1":[],"2":[], "3":[],"4":[], "5":[]}
+        self.labels = {str(i): [] for i in range(len(self.model.rq.vq_layers))}
         self.best_loss = np.inf
         self.best_collision_rate = np.inf
         self.best_loss_ckpt = "best_loss_model.pth"

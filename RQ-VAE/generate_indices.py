@@ -124,7 +124,7 @@ data_loader = DataLoader(data,num_workers=args.num_workers,
 
 all_indices = []
 all_indices_str = []
-prefix = ["<a_{}>","<b_{}>","<c_{}>","<d_{}>","<e_{}>","<f_{}>"]
+prefix = [f"<{chr(ord('a') + i)}_{{}}>" for i in range(26)]
 
 def constrained_km(data, n_clusters=10):
     from k_means_constrained import KMeansConstrained 
@@ -139,7 +139,7 @@ def constrained_km(data, n_clusters=10):
     t_labels = torch.from_numpy(clf.labels_).tolist()
     return t_centers, t_labels
 
-labels = {"0":[],"1":[],"2":[], "3":[]}
+labels = {str(i): [] for i in range(len(model.rq.vq_layers))}
 embs  = [layer.embedding.weight.cpu().detach().numpy() for layer in model.rq.vq_layers]
 
 

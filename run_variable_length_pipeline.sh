@@ -26,13 +26,15 @@ Options:
   --beta VALUE                 Diversity-loss weight (default: 0.0001)
   --min-length COUNT           Minimum SID length (default: 1)
   --max-length COUNT           Maximum SID length (default: 4)
-  --index-name NAME            Variable index filename (default: <dataset>.index.varlen.json)
+  --num-layers COUNT           Number of RQ-VAE codebook layers to train (default: max-length)
+  --index-name NAME            Variable index filename (default: <dataset>.index.varlen[.max<k>].json)
   --overwrite-index            Replace an existing variable index
   --tokenizer-only             Stop after variable-length index generation
   --models LIST                Comma-separated: tiger,lcrec (default: tiger)
   --base-model PATH            Base model for LC-Rec (default: huggyllama/llama-7b)
   --tiger-gpus IDS             CUDA devices for TIGER (default: autodetect, up to 2)
   --lcrec-gpus IDS             CUDA devices for LC-Rec (default: autodetect, up to 4)
+  --results-file PATH          Results JSON path (default: <model>/results/<dataset>/varlen[_max<k>].json)
   --skip-evaluation            Train selected recommenders without evaluation
   --python PATH                Python executable (default: python3)
   -h, --help                   Show this help
@@ -80,6 +82,8 @@ ALPHA="0.01"
 BETA="0.0001"
 MIN_LENGTH="1"
 MAX_LENGTH="4"
+NUM_LAYERS=""
+RESULTS_FILE=""
 INDEX_NAME=""
 MODELS="tiger"
 BASE_MODEL="${BASE_MODEL:-huggyllama/llama-7b}"
@@ -105,11 +109,13 @@ while [[ $# -gt 0 ]]; do
     --beta) BETA="$2"; shift 2 ;;
     --min-length) MIN_LENGTH="$2"; shift 2 ;;
     --max-length) MAX_LENGTH="$2"; shift 2 ;;
+    --num-layers) NUM_LAYERS="$2"; shift 2 ;;
     --index-name) INDEX_NAME="$2"; shift 2 ;;
     --models) MODELS="$2"; shift 2 ;;
     --base-model) BASE_MODEL="$2"; shift 2 ;;
     --tiger-gpus) TIGER_GPUS="$2"; shift 2 ;;
     --lcrec-gpus) LCREC_GPUS="$2"; shift 2 ;;
+    --results-file) RESULTS_FILE="$2"; shift 2 ;;
     --skip-evaluation) SKIP_EVALUATION=true; shift ;;
     --overwrite-index) OVERWRITE_INDEX=true; shift ;;
     --tokenizer-only) TOKENIZER_ONLY=true; shift ;;
@@ -144,11 +150,63 @@ if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   exit 1
 fi
 
-INDEX_NAME="${INDEX_NAME:-$DATASET.index.varlen.json}"
+if ! [[ "$MIN_LENGTH" =~ ^[1-9][0-9]*$ ]]; then
+  printf '--min-length must be a positive integer: %s\n' "$MIN_LENGTH" >&2
+  exit 2
+fi
+if ! [[ "$MAX_LENGTH" =~ ^[1-9][0-9]*$ ]]; then
+  printf '--max-length must be a positive integer: %s\n' "$MAX_LENGTH" >&2
+  exit 2
+fi
+if [[ "$MIN_LENGTH" -gt "$MAX_LENGTH" ]]; then
+  printf '--min-length (%s) cannot exceed --max-length (%s).\n' "$MIN_LENGTH" "$MAX_LENGTH" >&2
+  exit 2
+fi
+
+NUM_LAYERS="${NUM_LAYERS:-$MAX_LENGTH}"
+if [[ "$NUM_LAYERS" -lt "$MAX_LENGTH" ]]; then
+  printf '--num-layers (%s) must be at least --max-length (%s).\n' "$NUM_LAYERS" "$MAX_LENGTH" >&2
+  exit 2
+fi
+
+if [[ -z "$INDEX_NAME" ]]; then
+  if [[ "$MAX_LENGTH" -eq 4 && "$MIN_LENGTH" -eq 1 ]]; then
+    INDEX_NAME="$DATASET.index.varlen.json"
+  elif [[ "$MIN_LENGTH" -eq 1 ]]; then
+    INDEX_NAME="$DATASET.index.varlen.max${MAX_LENGTH}.json"
+  else
+    INDEX_NAME="$DATASET.index.varlen.min${MIN_LENGTH}-max${MAX_LENGTH}.json"
+  fi
+fi
 INDEX_FILE="$DATA_ROOT/$DATASET/$INDEX_NAME"
 INDEX_SUFFIX="${INDEX_NAME#"$DATASET"}"
-FIXED_INDEX_NAME="$DATASET.index.fixed-for-varlen.json"
+
+if [[ "$NUM_LAYERS" -eq 4 ]]; then
+  FIXED_INDEX_NAME="$DATASET.index.fixed-for-varlen.json"
+else
+  FIXED_INDEX_NAME="$DATASET.index.fixed-for-varlen.L${NUM_LAYERS}.json"
+fi
 FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/$FIXED_INDEX_NAME"
+
+if [[ "$MAX_LENGTH" -eq 4 && "$MIN_LENGTH" -eq 1 ]]; then
+  TIGER_CKPT_DIR="./ckpt/$DATASET-varlen"
+  LCREC_CKPT_DIR="./ckpt/$DATASET-varlen"
+  TIGER_DEFAULT_RESULTS="./results/$DATASET/varlen.json"
+  LCREC_DEFAULT_RESULTS="./results/$DATASET/varlen.json"
+  LCREC_WANDB_NAME="${DATASET}-varlen"
+else
+  TAG="max${MAX_LENGTH}"
+  if [[ "$MIN_LENGTH" -ne 1 ]]; then
+    TAG="min${MIN_LENGTH}-max${MAX_LENGTH}"
+  fi
+  TIGER_CKPT_DIR="./ckpt/$DATASET-varlen-${TAG}"
+  LCREC_CKPT_DIR="./ckpt/$DATASET-varlen-${TAG}"
+  TIGER_DEFAULT_RESULTS="./results/$DATASET/varlen_${TAG}.json"
+  LCREC_DEFAULT_RESULTS="./results/$DATASET/varlen_${TAG}.json"
+  LCREC_WANDB_NAME="${DATASET}-varlen-${TAG}"
+fi
+TIGER_RESULTS_FILE="${RESULTS_FILE:-$TIGER_DEFAULT_RESULTS}"
+LCREC_RESULTS_FILE="${RESULTS_FILE:-$LCREC_DEFAULT_RESULTS}"
 
 if [[ "$INDEX_SUFFIX" == "$INDEX_NAME" || "$INDEX_SUFFIX" != *.json ]]; then
   printf 'Index name must start with %s and end with .json: %s\n' "$DATASET" "$INDEX_NAME" >&2
@@ -201,25 +259,58 @@ RQ_CHECKPOINT_ROOT="$REPO_ROOT/checkpoint/$DATASET"
 
 find_latest_checkpoint() {
   local root="$1"
+  local desired_layers="${2:-4}"
   if [[ ! -d "$root" ]]; then
     return 0
   fi
   "$PYTHON_BIN" -c '
-import sys, glob, os
+import sys, glob, os, torch
 root = sys.argv[1]
+desired_layers = int(sys.argv[2])
 candidates = glob.glob(os.path.join(root, "**", "best_collision_model.pth"), recursive=True)
 if not candidates:
     candidates = glob.glob(os.path.join(root, "**", "best_loss_model.pth"), recursive=True)
-if candidates:
-    print(max(candidates, key=os.path.getmtime))
-' "$root" 2>/dev/null || true
+valid = []
+for c in candidates:
+    try:
+        ckpt = torch.load(c, map_location="cpu", weights_only=False)
+    except TypeError:
+        try:
+            ckpt = torch.load(c, map_location="cpu")
+        except Exception:
+            continue
+    except Exception:
+        continue
+    args = ckpt.get("args")
+    if args and hasattr(args, "num_emb_list") and len(args.num_emb_list) == desired_layers:
+        valid.append(c)
+if valid:
+    print(max(valid, key=os.path.getmtime))
+' "$root" "$desired_layers" 2>/dev/null || true
 }
 
+if [[ -n "$RQ_CHECKPOINT" && -f "$RQ_CHECKPOINT" ]]; then
+  CHECK_LAYERS=$("$PYTHON_BIN" -c '
+import sys, torch
+try:
+    ckpt = torch.load(sys.argv[1], map_location="cpu", weights_only=False)
+except TypeError:
+    ckpt = torch.load(sys.argv[1], map_location="cpu")
+args = ckpt.get("args")
+if args and hasattr(args, "num_emb_list"):
+    print(len(args.num_emb_list))
+' "$RQ_CHECKPOINT" 2>/dev/null || true)
+  if [[ -n "$CHECK_LAYERS" && "$CHECK_LAYERS" -lt "$MAX_LENGTH" ]]; then
+    printf "Specified RQ-VAE checkpoint has %s layers, fewer than --max-length (%s).\n" "$CHECK_LAYERS" "$MAX_LENGTH" >&2
+    exit 1
+  fi
+fi
+
 if [[ -z "$RQ_CHECKPOINT" && "$RETRAIN_RQVAE" != true ]]; then
-  DETECTED_CKPT="$(find_latest_checkpoint "$RQ_CHECKPOINT_ROOT")"
+  DETECTED_CKPT="$(find_latest_checkpoint "$RQ_CHECKPOINT_ROOT" "$NUM_LAYERS")"
   if [[ -n "$DETECTED_CKPT" && -f "$DETECTED_CKPT" ]]; then
     RQ_CHECKPOINT="$DETECTED_CKPT"
-    printf '\n[RQ-VAE] Autodetected existing checkpoint: %s\n' "$RQ_CHECKPOINT"
+    printf '\n[RQ-VAE] Autodetected existing %s-layer checkpoint: %s\n' "$NUM_LAYERS" "$RQ_CHECKPOINT"
     printf '[RQ-VAE] Reusing existing checkpoint (pass --retrain-rqvae to force training).\n'
   fi
 fi
@@ -236,6 +327,7 @@ else
     --rqvae-device "$RQ_DEVICE"
     --alpha "$ALPHA"
     --beta "$BETA"
+    --num-layers "$NUM_LAYERS"
     --index-name "$FIXED_INDEX_NAME"
     --models tiger
     --tokenizer-only
@@ -298,14 +390,14 @@ fi
 if contains_model tiger; then
   printf '\n[TIGER] Training with variable-length IDs...\n'
   STEP_START="$SECONDS"
-  mkdir -p "$REPO_ROOT/LETTER-TIGER/results/$DATASET"
+  mkdir -p "$(dirname "$TIGER_RESULTS_FILE")"
   (
     cd "$REPO_ROOT/LETTER-TIGER"
     CUDA_VISIBLE_DEVICES="$TIGER_GPUS" torchrun \
       --nproc_per_node="$(gpu_count "$TIGER_GPUS")" \
       --master_port=2314 \
       finetune.py \
-      --output_dir "./ckpt/$DATASET-varlen" \
+      --output_dir "$TIGER_CKPT_DIR" \
       --dataset "$DATASET" \
       --data_path "$DATA_ROOT" \
       --per_device_batch_size 256 \
@@ -317,8 +409,7 @@ if contains_model tiger; then
   printf 'Completed variable-length LETTER-TIGER training in %s.\n' \
     "$(format_duration "$((SECONDS - STEP_START))")"
   record_phase "Variable-length LETTER-TIGER training" "$((SECONDS - STEP_START))"
-  printf 'Stored LETTER-TIGER checkpoint: %s\n' \
-    "$REPO_ROOT/LETTER-TIGER/ckpt/$DATASET-varlen"
+  printf 'Stored LETTER-TIGER checkpoint: %s\n' "$TIGER_CKPT_DIR"
 
   if [[ "$SKIP_EVALUATION" != true ]]; then
     printf '\n[TIGER] Evaluating variable-length IDs...\n'
@@ -327,10 +418,10 @@ if contains_model tiger; then
       cd "$REPO_ROOT/LETTER-TIGER"
       "$PYTHON_BIN" test.py \
         --gpu_id 0 \
-        --ckpt_path "./ckpt/$DATASET-varlen" \
+        --ckpt_path "$TIGER_CKPT_DIR" \
         --dataset "$DATASET" \
         --data_path "$DATA_ROOT" \
-        --results_file "./results/$DATASET/varlen.json" \
+        --results_file "$TIGER_RESULTS_FILE" \
         --test_batch_size 32 \
         --num_beams 20 \
         --test_prompt_ids 0 \
@@ -339,15 +430,14 @@ if contains_model tiger; then
     printf 'Completed variable-length LETTER-TIGER evaluation in %s.\n' \
       "$(format_duration "$((SECONDS - STEP_START))")"
     record_phase "Variable-length LETTER-TIGER evaluation" "$((SECONDS - STEP_START))"
-    printf 'Stored LETTER-TIGER metrics: %s\n' \
-      "$REPO_ROOT/LETTER-TIGER/results/$DATASET/varlen.json"
+    printf 'Stored LETTER-TIGER metrics: %s\n' "$TIGER_RESULTS_FILE"
   fi
 fi
 
 if contains_model lcrec; then
   printf '\n[LC-Rec] Training with variable-length IDs...\n'
   STEP_START="$SECONDS"
-  mkdir -p "$REPO_ROOT/LETTER-LC-Rec/results/$DATASET"
+  mkdir -p "$(dirname "$LCREC_RESULTS_FILE")"
   (
     cd "$REPO_ROOT/LETTER-LC-Rec"
     CUDA_VISIBLE_DEVICES="$LCREC_GPUS" torchrun \
@@ -355,7 +445,7 @@ if contains_model lcrec; then
       --master_port=3325 \
       lora_finetune.py \
       --base_model "$BASE_MODEL" \
-      --output_dir "./ckpt/$DATASET-varlen" \
+      --output_dir "$LCREC_CKPT_DIR" \
       --dataset "$DATASET" \
       --data_path "$DATA_ROOT" \
       --per_device_batch_size 16 \
@@ -365,14 +455,13 @@ if contains_model lcrec; then
       --train_prompt_sample_num 1 \
       --train_data_sample_num 0 \
       --index_file "$INDEX_SUFFIX" \
-      --wandb_run_name "${DATASET}-varlen" \
+      --wandb_run_name "$LCREC_WANDB_NAME" \
       --temperature 1.0
   )
   printf 'Completed variable-length LETTER-LC-Rec training in %s.\n' \
     "$(format_duration "$((SECONDS - STEP_START))")"
   record_phase "Variable-length LETTER-LC-Rec training" "$((SECONDS - STEP_START))"
-  printf 'Stored LETTER-LC-Rec checkpoint: %s\n' \
-    "$REPO_ROOT/LETTER-LC-Rec/ckpt/$DATASET-varlen"
+  printf 'Stored LETTER-LC-Rec checkpoint: %s\n' "$LCREC_CKPT_DIR"
 
   if [[ "$SKIP_EVALUATION" != true ]]; then
     printf '\n[LC-Rec] Evaluating variable-length IDs...\n'
@@ -383,11 +472,11 @@ if contains_model lcrec; then
         --nproc_per_node="$(gpu_count "$LCREC_GPUS")" \
         --master_port=4324 \
         test_ddp.py \
-        --ckpt_path "./ckpt/$DATASET-varlen" \
+        --ckpt_path "$LCREC_CKPT_DIR" \
         --base_model "$BASE_MODEL" \
         --dataset "$DATASET" \
         --data_path "$DATA_ROOT" \
-        --results_file "./results/$DATASET/varlen.json" \
+        --results_file "$LCREC_RESULTS_FILE" \
         --test_batch_size 1 \
         --num_beams 20 \
         --test_prompt_ids 0 \
@@ -396,8 +485,7 @@ if contains_model lcrec; then
     printf 'Completed variable-length LETTER-LC-Rec evaluation in %s.\n' \
       "$(format_duration "$((SECONDS - STEP_START))")"
     record_phase "Variable-length LETTER-LC-Rec evaluation" "$((SECONDS - STEP_START))"
-    printf 'Stored LETTER-LC-Rec metrics: %s\n' \
-      "$REPO_ROOT/LETTER-LC-Rec/results/$DATASET/varlen.json"
+    printf 'Stored LETTER-LC-Rec metrics: %s\n' "$LCREC_RESULTS_FILE"
   fi
 fi
 
