@@ -28,6 +28,7 @@ Options:
   --max-length COUNT           Maximum SID length (default: 4)
   --index-name NAME            Variable index filename (default: <dataset>.index.varlen.json)
   --overwrite-index            Replace an existing variable index
+  --tokenizer-only             Stop after variable-length index generation
   --models LIST                Comma-separated: tiger,lcrec (default: tiger)
   --base-model PATH            Required when selecting lcrec
   --tiger-gpus IDS             CUDA devices for TIGER (default: autodetect, up to 2)
@@ -86,6 +87,7 @@ TIGER_GPUS=""
 LCREC_GPUS=""
 SKIP_EVALUATION=false
 OVERWRITE_INDEX=false
+TOKENIZER_ONLY=false
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 while [[ $# -gt 0 ]]; do
@@ -110,6 +112,7 @@ while [[ $# -gt 0 ]]; do
     --lcrec-gpus) LCREC_GPUS="$2"; shift 2 ;;
     --skip-evaluation) SKIP_EVALUATION=true; shift ;;
     --overwrite-index) OVERWRITE_INDEX=true; shift ;;
+    --tokenizer-only) TOKENIZER_ONLY=true; shift ;;
     --python) PYTHON_BIN="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'Unknown argument: %s\n' "$1" >&2; usage >&2; exit 2 ;;
@@ -148,22 +151,23 @@ if [[ "$INDEX_SUFFIX" == "$INDEX_NAME" || "$INDEX_SUFFIX" != *.json ]]; then
   printf 'Index name must start with %s and end with .json: %s\n' "$DATASET" "$INDEX_NAME" >&2
   exit 2
 fi
-if [[ -e "$INDEX_FILE" && "$OVERWRITE_INDEX" != true ]]; then
-  printf 'Variable-length index already exists: %s\nUse --overwrite-index to replace it.\n' "$INDEX_FILE" >&2
-  exit 1
-fi
+if [[ "$TOKENIZER_ONLY" != true ]]; then
+  contains_model() {
+    [[ ",$MODELS," == *",$1,"* ]]
+  }
 
-contains_model() {
-  [[ ",$MODELS," == *",$1,"* ]]
-}
-
-if ! contains_model tiger && ! contains_model lcrec; then
-  printf 'Select at least one supported model: tiger,lcrec\n' >&2
-  exit 2
-fi
-if contains_model lcrec && [[ -z "$BASE_MODEL" ]]; then
-  printf '%s\n' '--base-model is required when selecting lcrec.' >&2
-  exit 2
+  if ! contains_model tiger && ! contains_model lcrec; then
+    printf 'Select at least one supported model: tiger,lcrec\n' >&2
+    exit 2
+  fi
+  if contains_model lcrec && [[ -z "$BASE_MODEL" ]]; then
+    printf '%s\n' '--base-model is required when selecting lcrec.' >&2
+    exit 2
+  fi
+else
+  contains_model() {
+    false
+  }
 fi
 
 gpu_count() {
@@ -217,62 +221,76 @@ if [[ -z "$RQ_CHECKPOINT" && "$RETRAIN_RQVAE" != true ]]; then
   fi
 fi
 
-fixed_args=(
-  --dataset "$DATASET"
-  --data-root "$DATA_ROOT"
-  --rqvae-epochs "$RQ_EPOCHS"
-  --rqvae-eval-step "$RQ_EVAL_STEP"
-  --rqvae-device "$RQ_DEVICE"
-  --alpha "$ALPHA"
-  --beta "$BETA"
-  --index-name "$FIXED_INDEX_NAME"
-  --overwrite-index
-  --models tiger
-  --tokenizer-only
-  --python "$PYTHON_BIN"
-)
-if [[ "$RETRAIN_RQVAE" == true ]]; then
-  fixed_args+=(--retrain-rqvae)
-fi
-if [[ -n "$EMBEDDING_FILE" ]]; then
-  fixed_args+=(--embedding-file "$EMBEDDING_FILE")
-fi
-if [[ -n "$CF_EMBEDDING" ]]; then
-  fixed_args+=(--cf-embedding "$CF_EMBEDDING")
-fi
-if [[ -n "$RQ_CHECKPOINT" ]]; then
-  fixed_args+=(--rqvae-checkpoint "$RQ_CHECKPOINT")
-fi
-
-if [[ -f "$FIXED_INDEX_FILE" && "$OVERWRITE_INDEX" != true && "$RETRAIN_RQVAE" != true ]]; then
-  printf '\n[Fixed index] Found existing intermediate index: %s\n' "$FIXED_INDEX_FILE"
-  printf '[Fixed index] Reusing existing fixed index (pass --overwrite-index to regenerate).\n'
+if [[ -f "$INDEX_FILE" && "$OVERWRITE_INDEX" != true ]]; then
+  printf '\n[Variable index] Found existing variable-length index: %s\n' "$INDEX_FILE"
+  printf '[Variable index] Reusing existing index (pass --overwrite-index to regenerate).\n'
 else
-  printf '\n[Fixed index] Training or reusing RQ-VAE and generating a fixed index...\n'
+  fixed_args=(
+    --dataset "$DATASET"
+    --data-root "$DATA_ROOT"
+    --rqvae-epochs "$RQ_EPOCHS"
+    --rqvae-eval-step "$RQ_EVAL_STEP"
+    --rqvae-device "$RQ_DEVICE"
+    --alpha "$ALPHA"
+    --beta "$BETA"
+    --index-name "$FIXED_INDEX_NAME"
+    --models tiger
+    --tokenizer-only
+    --python "$PYTHON_BIN"
+  )
+  if [[ "$OVERWRITE_INDEX" == true ]]; then
+    fixed_args+=(--overwrite-index)
+  fi
+  if [[ "$RETRAIN_RQVAE" == true ]]; then
+    fixed_args+=(--retrain-rqvae)
+  fi
+  if [[ -n "$EMBEDDING_FILE" ]]; then
+    fixed_args+=(--embedding-file "$EMBEDDING_FILE")
+  fi
+  if [[ -n "$CF_EMBEDDING" ]]; then
+    fixed_args+=(--cf-embedding "$CF_EMBEDDING")
+  fi
+  if [[ -n "$RQ_CHECKPOINT" ]]; then
+    fixed_args+=(--rqvae-checkpoint "$RQ_CHECKPOINT")
+  fi
+
+  if [[ -f "$FIXED_INDEX_FILE" && "$OVERWRITE_INDEX" != true && "$RETRAIN_RQVAE" != true ]]; then
+    printf '\n[Fixed index] Found existing intermediate index: %s\n' "$FIXED_INDEX_FILE"
+    printf '[Fixed index] Reusing existing fixed index (pass --overwrite-index to regenerate).\n'
+  else
+    printf '\n[Fixed index] Training or reusing RQ-VAE and generating a fixed index...\n'
+    STEP_START="$SECONDS"
+    bash "$REPO_ROOT/run_fixed_length_pipeline.sh" "${fixed_args[@]}"
+    printf 'Completed fixed-index preparation in %s.\n' "$(format_duration "$((SECONDS - STEP_START))")"
+    record_phase "Fixed-index preparation" "$((SECONDS - STEP_START))"
+    printf 'Stored intermediate fixed-length index: %s\n' "$FIXED_INDEX_FILE"
+  fi
+
+  printf '\n[Variable index] Creating the variable-length item index...\n'
   STEP_START="$SECONDS"
-  bash "$REPO_ROOT/run_fixed_length_pipeline.sh" "${fixed_args[@]}"
-  printf 'Completed fixed-index preparation in %s.\n' "$(format_duration "$((SECONDS - STEP_START))")"
-  record_phase "Fixed-index preparation" "$((SECONDS - STEP_START))"
-  printf 'Stored intermediate fixed-length index: %s\n' "$FIXED_INDEX_FILE"
+  "$PYTHON_BIN" "$REPO_ROOT/RQ-VAE/truncate_indices.py" \
+    --input "$FIXED_INDEX_FILE" \
+    --output "$INDEX_FILE" \
+    --min-length "$MIN_LENGTH" \
+    --max-length "$MAX_LENGTH"
+
+  if [[ ! -f "$INDEX_FILE" ]]; then
+    printf 'Variable-length index generation completed without creating: %s\n' "$INDEX_FILE" >&2
+    exit 1
+  fi
+  printf 'Completed variable-length index generation in %s.\n' \
+    "$(format_duration "$((SECONDS - STEP_START))")"
+  record_phase "Variable-length index generation" "$((SECONDS - STEP_START))"
+  printf 'Stored variable-length item index: %s\n' "$INDEX_FILE"
+  printf 'Stored variable-length index summary: %s\n' "${INDEX_FILE%.json}.summary.json"
 fi
 
-printf '\n[Variable index] Creating the variable-length item index...\n'
-STEP_START="$SECONDS"
-"$PYTHON_BIN" "$REPO_ROOT/RQ-VAE/truncate_indices.py" \
-  --input "$FIXED_INDEX_FILE" \
-  --output "$INDEX_FILE" \
-  --min-length "$MIN_LENGTH" \
-  --max-length "$MAX_LENGTH"
-
-if [[ ! -f "$INDEX_FILE" ]]; then
-  printf 'Variable-length index generation completed without creating: %s\n' "$INDEX_FILE" >&2
-  exit 1
+if [[ "$TOKENIZER_ONLY" == true ]]; then
+  print_phase_durations
+  printf '\nTokenizer and variable-length index pipeline completed in %s.\n' \
+    "$(format_duration "$((SECONDS - PIPELINE_START))")"
+  exit 0
 fi
-printf 'Completed variable-length index generation in %s.\n' \
-  "$(format_duration "$((SECONDS - STEP_START))")"
-record_phase "Variable-length index generation" "$((SECONDS - STEP_START))"
-printf 'Stored variable-length item index: %s\n' "$INDEX_FILE"
-printf 'Stored variable-length index summary: %s\n' "${INDEX_FILE%.json}.summary.json"
 
 if contains_model tiger; then
   printf '\n[TIGER] Training with variable-length IDs...\n'

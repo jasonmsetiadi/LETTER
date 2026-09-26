@@ -146,17 +146,15 @@ if [[ "$INDEX_SUFFIX" == "$INDEX_NAME" || "$INDEX_SUFFIX" != *.json ]]; then
   printf 'Index name must start with %s and end with .json: %s\n' "$DATASET" "$INDEX_NAME" >&2
   exit 2
 fi
-if [[ ! -f "$EMBEDDING_FILE" ]]; then
-  printf 'Item embeddings not found: %s\nRun data_process/preprocess_item_embeddings.sh first.\n' "$EMBEDDING_FILE" >&2
-  exit 1
-fi
-if [[ ! -f "$CF_EMBEDDING" ]]; then
-  printf 'Collaborative-filtering embeddings not found: %s\n' "$CF_EMBEDDING" >&2
-  exit 1
-fi
-if [[ -e "$INDEX_FILE" && "$OVERWRITE_INDEX" != true ]]; then
-  printf 'Generated index already exists: %s\nUse --overwrite-index to replace it.\n' "$INDEX_FILE" >&2
-  exit 1
+if [[ ! -f "$INDEX_FILE" || "$OVERWRITE_INDEX" == true || "$RETRAIN_RQVAE" == true ]]; then
+  if [[ ! -f "$EMBEDDING_FILE" ]]; then
+    printf 'Item embeddings not found: %s\nRun data_process/preprocess_item_embeddings.sh first.\n' "$EMBEDDING_FILE" >&2
+    exit 1
+  fi
+  if [[ ! -f "$CF_EMBEDDING" ]]; then
+    printf 'Collaborative-filtering embeddings not found: %s\n' "$CF_EMBEDDING" >&2
+    exit 1
+  fi
 fi
 
 contains_model() {
@@ -212,63 +210,68 @@ if candidates:
 ' "$root" 2>/dev/null || true
 }
 
-DETECTED_CKPT=""
-if [[ -z "$RQ_CHECKPOINT" && "$RETRAIN_RQVAE" != true ]]; then
-  DETECTED_CKPT="$(find_latest_checkpoint "$RQ_CHECKPOINT_ROOT")"
-  if [[ -n "$DETECTED_CKPT" && -f "$DETECTED_CKPT" ]]; then
-    RQ_CHECKPOINT="$DETECTED_CKPT"
-    printf '\n[RQ-VAE] Autodetected existing checkpoint: %s\n' "$RQ_CHECKPOINT"
-    printf '[RQ-VAE] Reusing existing checkpoint (pass --retrain-rqvae to force training).\n'
+if [[ -f "$INDEX_FILE" && "$OVERWRITE_INDEX" != true && "$RETRAIN_RQVAE" != true ]]; then
+  printf '\n[Index] Found existing fixed-length index: %s\n' "$INDEX_FILE"
+  printf '[Index] Reusing existing index (pass --overwrite-index to regenerate).\n'
+else
+  DETECTED_CKPT=""
+  if [[ -z "$RQ_CHECKPOINT" && "$RETRAIN_RQVAE" != true ]]; then
+    DETECTED_CKPT="$(find_latest_checkpoint "$RQ_CHECKPOINT_ROOT")"
+    if [[ -n "$DETECTED_CKPT" && -f "$DETECTED_CKPT" ]]; then
+      RQ_CHECKPOINT="$DETECTED_CKPT"
+      printf '\n[RQ-VAE] Autodetected existing checkpoint: %s\n' "$RQ_CHECKPOINT"
+      printf '[RQ-VAE] Reusing existing checkpoint (pass --retrain-rqvae to force training).\n'
+    fi
   fi
-fi
 
-if [[ -z "$RQ_CHECKPOINT" ]]; then
-  printf '\n[RQ-VAE] Training the tokenizer...\n'
-  STEP_START="$SECONDS"
-  mkdir -p "$RQ_CHECKPOINT_ROOT"
-  "$PYTHON_BIN" "$REPO_ROOT/RQ-VAE/main.py" \
-    --device "$RQ_DEVICE" \
-    --data_path "$EMBEDDING_FILE" \
-    --cf_emb "$CF_EMBEDDING" \
-    --alpha "$ALPHA" \
-    --beta "$BETA" \
-    --epochs "$RQ_EPOCHS" \
-    --eval_step "$RQ_EVAL_STEP" \
-    --ckpt_dir "$RQ_CHECKPOINT_ROOT"
-
-  RQ_CHECKPOINT="$(find_latest_checkpoint "$RQ_CHECKPOINT_ROOT")"
   if [[ -z "$RQ_CHECKPOINT" ]]; then
-    printf 'RQ-VAE training completed without a best_collision_model.pth checkpoint.\n' >&2
+    printf '\n[RQ-VAE] Training the tokenizer...\n'
+    STEP_START="$SECONDS"
+    mkdir -p "$RQ_CHECKPOINT_ROOT"
+    "$PYTHON_BIN" "$REPO_ROOT/RQ-VAE/main.py" \
+      --device "$RQ_DEVICE" \
+      --data_path "$EMBEDDING_FILE" \
+      --cf_emb "$CF_EMBEDDING" \
+      --alpha "$ALPHA" \
+      --beta "$BETA" \
+      --epochs "$RQ_EPOCHS" \
+      --eval_step "$RQ_EVAL_STEP" \
+      --ckpt_dir "$RQ_CHECKPOINT_ROOT"
+
+    RQ_CHECKPOINT="$(find_latest_checkpoint "$RQ_CHECKPOINT_ROOT")"
+    if [[ -z "$RQ_CHECKPOINT" ]]; then
+      printf 'RQ-VAE training completed without a best_collision_model.pth checkpoint.\n' >&2
+      exit 1
+    fi
+    printf 'Completed RQ-VAE training in %s.\n' "$(format_duration "$((SECONDS - STEP_START))")"
+    record_phase "RQ-VAE training" "$((SECONDS - STEP_START))"
+    printf 'Stored RQ-VAE checkpoint: %s\n' "$RQ_CHECKPOINT"
+  else
+    if [[ "$DETECTED_CKPT" != "$RQ_CHECKPOINT" ]]; then
+      printf '\n[RQ-VAE] Reusing checkpoint: %s\n' "$RQ_CHECKPOINT"
+    fi
+  fi
+  if [[ ! -f "$RQ_CHECKPOINT" ]]; then
+    printf 'RQ-VAE checkpoint not found: %s\n' "$RQ_CHECKPOINT" >&2
     exit 1
   fi
-  printf 'Completed RQ-VAE training in %s.\n' "$(format_duration "$((SECONDS - STEP_START))")"
-  record_phase "RQ-VAE training" "$((SECONDS - STEP_START))"
-  printf 'Stored RQ-VAE checkpoint: %s\n' "$RQ_CHECKPOINT"
-else
-  if [[ "$DETECTED_CKPT" != "$RQ_CHECKPOINT" ]]; then
-    printf '\n[RQ-VAE] Reusing checkpoint: %s\n' "$RQ_CHECKPOINT"
+
+  printf '\n[Index] Generating the fixed-length item index...\n'
+  STEP_START="$SECONDS"
+  "$PYTHON_BIN" "$REPO_ROOT/RQ-VAE/generate_indices.py" \
+    --dataset "$DATASET" \
+    --checkpoint-path "$RQ_CHECKPOINT" \
+    --output-file "$INDEX_FILE" \
+    --device "$RQ_DEVICE"
+
+  if [[ ! -f "$INDEX_FILE" ]]; then
+    printf 'Index generation completed without creating: %s\n' "$INDEX_FILE" >&2
+    exit 1
   fi
+  printf 'Completed fixed-index generation in %s.\n' "$(format_duration "$((SECONDS - STEP_START))")"
+  record_phase "Fixed-length index generation" "$((SECONDS - STEP_START))"
+  printf 'Stored fixed-length item index: %s\n' "$INDEX_FILE"
 fi
-if [[ ! -f "$RQ_CHECKPOINT" ]]; then
-  printf 'RQ-VAE checkpoint not found: %s\n' "$RQ_CHECKPOINT" >&2
-  exit 1
-fi
-
-printf '\n[Index] Generating the fixed-length item index...\n'
-STEP_START="$SECONDS"
-"$PYTHON_BIN" "$REPO_ROOT/RQ-VAE/generate_indices.py" \
-  --dataset "$DATASET" \
-  --checkpoint-path "$RQ_CHECKPOINT" \
-  --output-file "$INDEX_FILE" \
-  --device "$RQ_DEVICE"
-
-if [[ ! -f "$INDEX_FILE" ]]; then
-  printf 'Index generation completed without creating: %s\n' "$INDEX_FILE" >&2
-  exit 1
-fi
-printf 'Completed fixed-index generation in %s.\n' "$(format_duration "$((SECONDS - STEP_START))")"
-record_phase "Fixed-length index generation" "$((SECONDS - STEP_START))"
-printf 'Stored fixed-length item index: %s\n' "$INDEX_FILE"
 
 if [[ "$TOKENIZER_ONLY" == true ]]; then
   print_phase_durations
