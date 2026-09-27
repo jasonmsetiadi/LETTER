@@ -124,10 +124,10 @@ $$\mathbb{E}[\text{Decoding Length}] = \sum_{i \in \mathcal{I}} P(i) \cdot \text
 where $P(i) = \frac{\text{freq}(i)}{\sum_j \text{freq}(j)}$.
 
 ### Mathematical Formulation & Quantile Tiering
-Given length bounds $[L_{\min}, L_{\max}]$, we construct $K = L_{\max} - L_{\min} + 1$ discrete length tiers based on empirical interaction counts:
+Given length bounds $[L_{\min}, L_{\max}]$, we construct $K = L_{\max} - L_{\min} + 1$ discrete length tiers based on empirical interaction scores:
 
-1. **Rank all items** by interaction frequency:
-   $$\text{rank}(i) \in [0, |\mathcal{I}| - 1] \quad \text{where } f_{(0)} \le f_{(1)} \le \dots \le f_{(|\mathcal{I}|-1)}$$
+1. **Rank all items** by collaborative score $S(i)$:
+   $$\text{rank}(i) \in [0, |\mathcal{I}| - 1] \quad \text{where } S_{(0)} \le S_{(1)} \le \dots \le S_{(|\mathcal{I}|-1)}$$
 
 2. **Assign Minimum Allowable Length**:
    $$\text{tier}(i) = \min\left(\left\lfloor \frac{\text{rank}(i) \cdot K}{|\mathcal{I}|} \right\rfloor, K - 1\right) \in \{0, 1, \dots, K-1\}$$
@@ -144,7 +144,20 @@ Given length bounds $[L_{\min}, L_{\max}]$, we construct $K = L_{\max} - L_{\min
   [ Tail Protected  |    Light Comp.     |   Moderate Comp.    |  Maximal Comp.  ]
 ```
 
-### Empirical Results on `Instruments`:
+### Collaborative Signal Options (`--collab-signal`)
+
+While raw frequency provides an intuitive baseline, the codebase supports five additional collaborative signals extracted from user-item interactions and CF manifolds:
+
+| Signal Flag | Formal Definition | Theoretical Motivation | When to Use |
+| :--- | :--- | :--- | :--- |
+| `frequency` *(default)* | $S(i) = \sum_u \sum_t \mathbb{I}(s_{u,t} = i)$ | Classical memoryless source coding ($-\log P(i)$) | Standard baseline for skewed Pareto traffic. |
+| `user_entropy` | $H(i) = -\sum_u P(u \mid i) \log_2 P(u \mid i)$ | Audience dispersion vs. power-user binging | Penalizes items whose volume is driven by few power users. |
+| `pagerank` | $\pi = (1 - d)\mathbf{v} + d P^T \pi$ | Sequential random-walk stationary centrality | Identifies structural transition hubs across user journeys. |
+| `target` | $S(i) = \sum_u \mathbb{I}(s_{u, -1} = i)$ | Next-item generation frequency | Directly optimizes tokens generated at inference time. |
+| `cf_density` | $S(i) = 1 - \frac{1}{k}\sum_{j \in \mathcal{N}_k(i)} \cos(e_i, e_j)$ | Latent behavioral manifold isolation | Protects items in crowded CF clusters from colliding. |
+| `composite` | $S(i) = \log_2(1 + f_i) \cdot (1 + H_{\text{user}}(i))$ | Joint traffic volume & audience breadth | Prevents power-user distortion while retaining traffic scaling. |
+
+### Empirical Results on `Instruments` (Frequency Signal):
 - **Head Items (Length 2)**: 2,172 items (average frequency = **29.5 interactions**)
 - **Body Items (Length 3)**: 4,792 items (average frequency = **21.9 interactions**)
 - **Tail Items (Length 4)**: 2,958 items (average frequency = **12.5 interactions**)
@@ -183,21 +196,53 @@ Best Fit When  │ Complex items with rich text  │ Skewed / heavy-tailed traff
 
 ## 6. How to Run Each Strategy in the Codebase
 
-### 1. Huffman-Inspired (Popularity Strategy)
+### 1. Huffman-Inspired / Collaborative Strategy
 ```bash
-# Direct truncation
+# A. Standard unigram frequency (baseline)
 python3 RQ-VAE/truncate_indices.py \
   --input data/Instruments/Instruments.index.json \
   --output data/Instruments/Instruments.index.varlen.pop.json \
   --min-length 1 \
   --max-length 4 \
   --strategy popularity \
+  --collab-signal frequency \
   --inter-file data/Instruments/Instruments.inter.json
 
-# End-to-end pipeline run (training + evaluation)
+# B. User audience dispersion (penalizes power-user bingeing)
+python3 RQ-VAE/truncate_indices.py \
+  --input data/Instruments/Instruments.index.json \
+  --output data/Instruments/Instruments.index.varlen.pop-entropy.json \
+  --min-length 1 \
+  --max-length 4 \
+  --strategy collaborative \
+  --collab-signal user_entropy \
+  --inter-file data/Instruments/Instruments.inter.json
+
+# C. Sequential transition centrality (PageRank on user journeys)
+python3 RQ-VAE/truncate_indices.py \
+  --input data/Instruments/Instruments.index.json \
+  --output data/Instruments/Instruments.index.varlen.pop-pagerank.json \
+  --min-length 1 \
+  --max-length 4 \
+  --strategy collaborative \
+  --collab-signal pagerank \
+  --inter-file data/Instruments/Instruments.inter.json
+
+# D. Target-position generation frequency (optimizes inference generation)
+python3 RQ-VAE/truncate_indices.py \
+  --input data/Instruments/Instruments.index.json \
+  --output data/Instruments/Instruments.index.varlen.pop-target.json \
+  --min-length 1 \
+  --max-length 4 \
+  --strategy collaborative \
+  --collab-signal target \
+  --inter-file data/Instruments/Instruments.inter.json
+
+# E. End-to-end pipeline run across collaborative signals
 bash run_strategy_experiments.sh \
   --dataset Instruments \
   --strategies popularity \
+  --collab-signal user_entropy \
   --models tiger
 ```
 

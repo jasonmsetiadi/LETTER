@@ -83,13 +83,42 @@ def main():
                 )
                 res_file = os.path.join(repo_root, model_dir, "results", dataset, f"varlen{tag}.json")
 
-            elif strat == "popularity":
+            elif (
+                strat == "popularity"
+                or strat.startswith("popularity:")
+                or strat.startswith("collaborative:")
+                or strat.startswith("pop-")
+            ):
+                if ":" in strat:
+                    sig = strat.split(":", 1)[1]
+                elif strat.startswith("pop-"):
+                    sig = strat[4:]
+                else:
+                    sig = "frequency"
+
+                sig_map = {
+                    "frequency": ("pop", "-pop"),
+                    "raw": ("pop", "-pop"),
+                    "user_entropy": ("pop-entropy", "-pop-entropy"),
+                    "entropy": ("pop-entropy", "-pop-entropy"),
+                    "pagerank": ("pop-pagerank", "-pop-pagerank"),
+                    "pr": ("pop-pagerank", "-pop-pagerank"),
+                    "target": ("pop-target", "-pop-target"),
+                    "target_frequency": ("pop-target", "-pop-target"),
+                    "composite": ("pop-composite", "-pop-composite"),
+                    "cf_density": ("pop-cf", "-pop-cf"),
+                }
+                file_tag, res_tag = sig_map.get(sig, (f"pop-{sig}", f"-pop-{sig}"))
                 idx_summary_file = os.path.join(
-                    data_root, dataset, f"{dataset}.index.varlen.pop{tag}.summary.json"
+                    data_root, dataset, f"{dataset}.index.varlen.{file_tag}{tag}.summary.json"
                 )
-                pop_tag = "-pop" if not tag else f"-pop{tag}"
+                if not os.path.isfile(idx_summary_file):
+                    idx_summary_file = os.path.join(
+                        data_root, dataset, f"{dataset}.index.varlen.{file_tag}.summary.json"
+                    )
+                full_res_tag = res_tag if not tag else f"{res_tag}{tag}"
                 res_file = os.path.join(
-                    repo_root, model_dir, "results", dataset, f"varlen{pop_tag}.json"
+                    repo_root, model_dir, "results", dataset, f"varlen{full_res_tag}.json"
                 )
 
             elif strat == "residual":

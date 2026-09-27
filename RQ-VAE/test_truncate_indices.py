@@ -177,6 +177,111 @@ class TruncateIndicesTest(unittest.TestCase):
                 indices, min_length=1, max_length=2, strategy="invalid_strategy"
             )
 
+    def test_collaborative_user_entropy_distinguishes_power_users(self):
+        # Item "0" has 10 interactions from 10 distinct users -> high entropy
+        # Item "1" has 10 interactions from 1 single user -> low entropy (0.0)
+        # Item "2" has 1 interaction -> entropy 0.0
+        inter_data = {
+            f"user_{i}": ["0"] for i in range(10)
+        }
+        inter_data["power_user"] = ["1"] * 10
+        inter_data["solo_user"] = ["2"]
+
+        scores, freqs = truncate_indices_module.compute_interaction_signals(
+            inter_data, signal="user_entropy"
+        )
+        self.assertEqual(freqs["0"], 10)
+        self.assertEqual(freqs["1"], 10)
+        self.assertGreater(scores["0"], 3.0)  # log2(10) ~ 3.32
+        self.assertAlmostEqual(scores["1"], 0.0)
+
+        # Now test truncation tiering with user_entropy
+        indices = {
+            "0": ["<a_0>", "<b_0>", "<c_0>"],
+            "1": ["<a_1>", "<b_1>", "<c_1>"],
+            "2": ["<a_2>", "<b_2>", "<c_2>"],
+        }
+        truncated, lengths = truncate_indices_module.truncate_indices(
+            indices,
+            min_length=1,
+            max_length=3,
+            strategy="collaborative",
+            item_scores=scores,
+        )
+        # "0" should be ranked highest (shortest length: 1)
+        self.assertEqual(lengths["0"], 1)
+        # "1" has low entropy, so it is ranked lower than "0"
+        self.assertGreater(lengths["1"], lengths["0"])
+
+    def test_collaborative_target_frequency(self):
+        inter_data = {
+            "u1": ["0", "1", "2"],  # "2" is target
+            "u2": ["0", "2"],       # "2" is target
+            "u3": ["1", "0"],       # "0" is target
+        }
+        scores, freqs = truncate_indices_module.compute_interaction_signals(
+            inter_data, signal="target"
+        )
+        # "2" is target 2 times, "0" is target 1 time, "1" is target 0 times
+        self.assertEqual(scores["2"], 2.0)
+        self.assertEqual(scores["0"], 1.0)
+        self.assertEqual(scores["1"], 0.0)
+
+        indices = {
+            "0": ["<a_0>", "<b_0>", "<c_0>"],
+            "1": ["<a_1>", "<b_1>", "<c_1>"],
+            "2": ["<a_2>", "<b_2>", "<c_2>"],
+        }
+        truncated, lengths = truncate_indices_module.truncate_indices(
+            indices,
+            min_length=1,
+            max_length=3,
+            strategy="collaborative",
+            item_scores=scores,
+        )
+        self.assertEqual(lengths["2"], 1)
+        self.assertEqual(lengths["1"], 3)
+
+    def test_collaborative_pagerank(self):
+        # 0 -> 1, 2 -> 1, 3 -> 1: Item 1 is a major transition sink/hub
+        inter_data = {
+            "u1": ["0", "1"],
+            "u2": ["2", "1"],
+            "u3": ["3", "1"],
+        }
+        scores, _ = truncate_indices_module.compute_interaction_signals(
+            inter_data, signal="pagerank"
+        )
+        self.assertGreater(scores["1"], scores["0"])
+        self.assertGreater(scores["1"], scores["2"])
+        self.assertGreater(scores["1"], scores["3"])
+
+        indices = {
+            "0": ["<a_0>", "<b_0>", "<c_0>"],
+            "1": ["<a_1>", "<b_1>", "<c_1>"],
+            "2": ["<a_2>", "<b_2>", "<c_2>"],
+            "3": ["<a_3>", "<b_3>", "<c_3>"],
+        }
+        _, lengths = truncate_indices_module.truncate_indices(
+            indices,
+            min_length=1,
+            max_length=3,
+            strategy="collaborative",
+            item_scores=scores,
+        )
+        # Item 1 should have the shortest length
+        self.assertEqual(lengths["1"], 1)
+
+    def test_collaborative_composite_signal(self):
+        inter_data = {
+            f"user_{i}": ["0"] for i in range(10)
+        }
+        inter_data["solo"] = ["1"]
+        scores, _ = truncate_indices_module.compute_interaction_signals(
+            inter_data, signal="composite"
+        )
+        self.assertGreater(scores["0"], scores["1"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -27,8 +27,11 @@ Options:
   --min-length COUNT           Minimum SID length (default: 1)
   --max-length COUNT           Maximum SID length (default: 4)
   --num-layers COUNT           Number of RQ-VAE codebook layers to train (default: max-length)
-  --strategy NAME              Truncation strategy: shortest_unique, popularity, residual (default: shortest_unique)
+  --strategy NAME              Truncation strategy: shortest_unique, popularity, collaborative, residual (default: shortest_unique)
+  --collab-signal SIGNAL       Collaborative signal for popularity/collaborative:
+                               frequency, user_entropy, pagerank, target, composite, cf_density (default: frequency)
   --inter-file PATH            Interaction JSON for popularity strategy (default: <data-root>/<dataset>/<dataset>.inter.json)
+  --cf-emb-file PATH           Path to CF embeddings (.pt, .npy) for cf_density/composite signal
   --residuals-file PATH        Residuals JSON for residual strategy (default: <data-root>/<dataset>/<dataset>.residuals.json)
   --residual-threshold VALUE   Reconstruction error threshold for residual strategy (default: 0.2)
   --index-name NAME            Variable index filename (default: <dataset>.index.varlen[.<strat>][.max<k>].json)
@@ -88,7 +91,9 @@ MIN_LENGTH="1"
 MAX_LENGTH="4"
 NUM_LAYERS=""
 STRATEGY="shortest_unique"
+COLLAB_SIGNAL="frequency"
 INTER_FILE=""
+CF_EMB_FILE=""
 RESIDUALS_FILE=""
 RESIDUAL_THRESHOLD="0.2"
 RESULTS_FILE=""
@@ -119,7 +124,9 @@ while [[ $# -gt 0 ]]; do
     --max-length) MAX_LENGTH="$2"; shift 2 ;;
     --num-layers) NUM_LAYERS="$2"; shift 2 ;;
     --strategy) STRATEGY="$2"; shift 2 ;;
+    --collab-signal|--popularity-signal) COLLAB_SIGNAL="$2"; shift 2 ;;
     --inter-file) INTER_FILE="$2"; shift 2 ;;
+    --cf-emb-file) CF_EMB_FILE="$2"; shift 2 ;;
     --residuals-file) RESIDUALS_FILE="$2"; shift 2 ;;
     --residual-threshold) RESIDUAL_THRESHOLD="$2"; shift 2 ;;
     --index-name) INDEX_NAME="$2"; shift 2 ;;
@@ -188,12 +195,40 @@ case "$STRATEGY" in
     STRAT_SUFFIX=""
     STRAT_TAG=""
     ;;
-  popularity)
-    STRAT_SUFFIX=".pop"
-    STRAT_TAG="-pop"
+  popularity|collaborative)
+    case "$COLLAB_SIGNAL" in
+      frequency|raw|pop)
+        STRAT_SUFFIX=".pop"
+        STRAT_TAG="-pop"
+        ;;
+      user_entropy|entropy)
+        STRAT_SUFFIX=".pop-entropy"
+        STRAT_TAG="-pop-entropy"
+        ;;
+      pagerank|pr)
+        STRAT_SUFFIX=".pop-pagerank"
+        STRAT_TAG="-pop-pagerank"
+        ;;
+      target|target_frequency)
+        STRAT_SUFFIX=".pop-target"
+        STRAT_TAG="-pop-target"
+        ;;
+      cf_density|cf_isolation)
+        STRAT_SUFFIX=".pop-cf"
+        STRAT_TAG="-pop-cf"
+        ;;
+      composite)
+        STRAT_SUFFIX=".pop-composite"
+        STRAT_TAG="-pop-composite"
+        ;;
+      *)
+        printf 'Unknown collaborative signal: %s (choose frequency, user_entropy, pagerank, target, composite, cf_density)\n' "$COLLAB_SIGNAL" >&2
+        exit 2
+        ;;
+    esac
     INTER_FILE="${INTER_FILE:-$DATA_ROOT/$DATASET/$DATASET.inter.json}"
-    if [[ ! -f "$INTER_FILE" ]]; then
-      printf 'Interaction file not found for popularity strategy: %s\n' "$INTER_FILE" >&2
+    if [[ ! -f "$INTER_FILE" && "$COLLAB_SIGNAL" != "cf_density" ]]; then
+      printf 'Interaction file not found for %s strategy: %s\n' "$STRATEGY" "$INTER_FILE" >&2
       exit 1
     fi
     ;;
@@ -208,7 +243,7 @@ case "$STRATEGY" in
     fi
     ;;
   *)
-    printf 'Unknown strategy: %s (choose shortest_unique, popularity, or residual)\n' "$STRATEGY" >&2
+    printf 'Unknown strategy: %s (choose shortest_unique, popularity, collaborative, or residual)\n' "$STRATEGY" >&2
     exit 2
     ;;
 esac
@@ -231,6 +266,15 @@ else
   FIXED_INDEX_NAME="$DATASET.index.fixed-for-varlen.L${NUM_LAYERS}.json"
 fi
 FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/$FIXED_INDEX_NAME"
+if [[ ! -f "$FIXED_INDEX_FILE" ]]; then
+  if [[ "$NUM_LAYERS" -eq 4 && -f "$DATA_ROOT/$DATASET/$DATASET.index.json" ]]; then
+    FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/$DATASET.index.json"
+    FIXED_INDEX_NAME="$DATASET.index.json"
+  elif [[ -f "$DATA_ROOT/$DATASET/$DATASET.index.fixed.json" ]]; then
+    FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/$DATASET.index.fixed.json"
+    FIXED_INDEX_NAME="$DATASET.index.fixed.json"
+  fi
+fi
 
 if [[ "$MAX_LENGTH" -eq 4 && "$MIN_LENGTH" -eq 1 ]]; then
   TIGER_CKPT_DIR="./ckpt/$DATASET-varlen${STRAT_TAG}"
@@ -428,8 +472,15 @@ else
     --max-length "$MAX_LENGTH"
     --strategy "$STRATEGY"
   )
-  if [[ "$STRATEGY" == "popularity" ]]; then
-    truncate_args+=(--inter-file "$INTER_FILE")
+  if [[ "$STRATEGY" == "popularity" || "$STRATEGY" == "collaborative" ]]; then
+    if [[ -n "$INTER_FILE" ]]; then
+      truncate_args+=(--inter-file "$INTER_FILE")
+    fi
+    truncate_args+=(--collab-signal "$COLLAB_SIGNAL")
+    CF_CANDIDATE="${CF_EMB_FILE:-${CF_EMBEDDING}}"
+    if [[ -n "$CF_CANDIDATE" ]]; then
+      truncate_args+=(--cf-emb-file "$CF_CANDIDATE")
+    fi
   elif [[ "$STRATEGY" == "residual" ]]; then
     truncate_args+=(--residuals-file "$RESIDUALS_FILE" --residual-threshold "$RESIDUAL_THRESHOLD")
   fi

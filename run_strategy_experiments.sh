@@ -23,6 +23,9 @@ Options:
   --data-root PATH             Dataset parent directory (default: <repo>/data)
   --inter-file PATH            Interaction JSON for popularity strategy
                                (default: <data-root>/<dataset>/<dataset>.inter.json)
+  --collab-signal SIGNAL       Collaborative signal for popularity/collaborative:
+                               frequency, user_entropy, pagerank, target, composite, cf_density (default: frequency)
+  --cf-emb-file PATH           Path to CF embeddings (.pt, .npy) for cf_density/composite signal
   --residuals-file PATH        Residuals JSON for residual strategy
                                (default: <data-root>/<dataset>/<dataset>.residuals.json)
   --residual-threshold VALUE   Reconstruction error threshold for residual strategy (default: 0.2)
@@ -75,6 +78,9 @@ ALPHA="0.01"
 BETA="0.0001"
 TIGER_GPUS=""
 LCREC_GPUS=""
+COLLAB_SIGNAL="frequency"
+COLLAB_SIGNALS_STR=""
+CF_EMB_FILE=""
 SKIP_EXISTING=false
 RETRAIN_RQVAE=false
 OVERWRITE_INDEX=false
@@ -93,6 +99,9 @@ while [[ $# -gt 0 ]]; do
     --base-model) BASE_MODEL="$2"; shift 2 ;;
     --data-root) DATA_ROOT="$2"; shift 2 ;;
     --inter-file) INTER_FILE="$2"; shift 2 ;;
+    --collab-signal|--popularity-signal) COLLAB_SIGNAL="$2"; shift 2 ;;
+    --collab-signals) COLLAB_SIGNALS_STR="$2"; shift 2 ;;
+    --cf-emb-file) CF_EMB_FILE="$2"; shift 2 ;;
     --residuals-file) RESIDUALS_FILE="$2"; shift 2 ;;
     --residual-threshold) RESIDUAL_THRESHOLD="$2"; shift 2 ;;
     --auto-compute-residuals) AUTO_COMPUTE_RESIDUALS=true; shift ;;
@@ -129,12 +138,30 @@ fi
 INTER_FILE="${INTER_FILE:-$DATA_ROOT/$DATASET/$DATASET.inter.json}"
 RESIDUALS_FILE="${RESIDUALS_FILE:-$DATA_ROOT/$DATASET/$DATASET.residuals.json}"
 
-# Parse strategies
-IFS=', ' read -r -a STRATEGIES <<< "$STRATEGIES_STR"
+# Parse and expand strategies
+EXPANDED_STRATEGIES=()
+IFS=', ' read -r -a RAW_STRATEGIES <<< "$STRATEGIES_STR"
+for S in "${RAW_STRATEGIES[@]}"; do
+  if [[ "$S" == "popularity" || "$S" == "collaborative" ]] && [[ -n "$COLLAB_SIGNALS_STR" ]]; then
+    if [[ "$COLLAB_SIGNALS_STR" == "all" ]]; then
+      SIG_LIST=("frequency" "user_entropy" "pagerank" "target" "composite")
+      if [[ -n "$CF_EMB_FILE" ]]; then SIG_LIST+=("cf_density"); fi
+    else
+      IFS=', ' read -r -a SIG_LIST <<< "$COLLAB_SIGNALS_STR"
+    fi
+    for sig_item in "${SIG_LIST[@]}"; do
+      EXPANDED_STRATEGIES+=("popularity:${sig_item}")
+    done
+  else
+    EXPANDED_STRATEGIES+=("$S")
+  fi
+done
+STRATEGIES=("${EXPANDED_STRATEGIES[@]}")
+
 for S in "${STRATEGIES[@]}"; do
   case "$S" in
-    fixed|shortest_unique|popularity|residual) ;;
-    *) printf 'Unsupported strategy: %s (choose from: fixed, shortest_unique, popularity, residual)\n' "$S" >&2; exit 2 ;;
+    fixed|shortest_unique|popularity*|collaborative*|residual) ;;
+    *) printf 'Unsupported strategy: %s (choose from: fixed, shortest_unique, popularity, collaborative, residual)\n' "$S" >&2; exit 2 ;;
   esac
 done
 
@@ -163,11 +190,25 @@ get_result_path() {
     shortest_unique)
       printf '%s/%s/results/%s/varlen%s.json' "$REPO_ROOT" "$model_dir" "$DATASET" "$tag"
       ;;
-    popularity)
+    popularity*|collaborative*)
+      local sig="$COLLAB_SIGNAL"
+      if [[ "$strat" == *:* ]]; then
+        sig="${strat#*:}"
+      fi
+      local pop_tag="-pop"
+      case "$sig" in
+        frequency|raw) pop_tag="-pop" ;;
+        user_entropy|entropy) pop_tag="-pop-entropy" ;;
+        pagerank|pr) pop_tag="-pop-pagerank" ;;
+        target|target_frequency) pop_tag="-pop-target" ;;
+        composite) pop_tag="-pop-composite" ;;
+        cf_density) pop_tag="-pop-cf" ;;
+        *) pop_tag="-pop-$sig" ;;
+      esac
       if [[ -z "$tag" ]]; then
-        printf '%s/%s/results/%s/varlen-pop.json' "$REPO_ROOT" "$model_dir" "$DATASET"
+        printf '%s/%s/results/%s/varlen%s.json' "$REPO_ROOT" "$model_dir" "$DATASET" "$pop_tag"
       else
-        printf '%s/%s/results/%s/varlen-pop%s.json' "$REPO_ROOT" "$model_dir" "$DATASET" "$tag"
+        printf '%s/%s/results/%s/varlen%s%s.json' "$REPO_ROOT" "$model_dir" "$DATASET" "$pop_tag" "$tag"
       fi
       ;;
     residual)
@@ -301,9 +342,14 @@ if candidates:
 
       "${varlen_cmd[@]}"
 
-    elif [[ "$STRAT" == "popularity" ]]; then
-      if [[ ! -f "$INTER_FILE" ]]; then
-        printf 'Error: Interaction file not found for popularity strategy: %s\n' "$INTER_FILE" >&2
+    elif [[ "$STRAT" == popularity* || "$STRAT" == collaborative* ]]; then
+      CURRENT_STRAT="popularity"
+      CURRENT_SIGNAL="$COLLAB_SIGNAL"
+      if [[ "$STRAT" == *:* ]]; then
+        CURRENT_SIGNAL="${STRAT#*:}"
+      fi
+      if [[ ! -f "$INTER_FILE" && "$CURRENT_SIGNAL" != "cf_density" ]]; then
+        printf 'Error: Interaction file not found for %s strategy: %s\n' "$STRAT" "$INTER_FILE" >&2
         exit 1
       fi
 
@@ -314,7 +360,8 @@ if candidates:
         --min-length "$MIN_LENGTH"
         --max-length "$MAX_LENGTH"
         --num-layers "$MAX_LENGTH"
-        --strategy "popularity"
+        --strategy "$CURRENT_STRAT"
+        --collab-signal "$CURRENT_SIGNAL"
         --inter-file "$INTER_FILE"
         --models "$MODELS"
         --base-model "$BASE_MODEL"
@@ -325,6 +372,7 @@ if candidates:
         --beta "$BETA"
         --python "$PYTHON_BIN"
       )
+      if [[ -n "$CF_EMB_FILE" ]]; then varlen_cmd+=(--cf-emb-file "$CF_EMB_FILE"); fi
       if [[ -n "$TIGER_GPUS" ]]; then varlen_cmd+=(--tiger-gpus "$TIGER_GPUS"); fi
       if [[ -n "$LCREC_GPUS" ]]; then varlen_cmd+=(--lcrec-gpus "$LCREC_GPUS"); fi
       if [[ "$RETRAIN_RQVAE" == true ]]; then varlen_cmd+=(--retrain-rqvae); fi
