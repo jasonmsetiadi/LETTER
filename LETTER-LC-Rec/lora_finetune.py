@@ -34,15 +34,17 @@ def train(args):
     set_seed(args.seed)
     ensure_dir(args.output_dir)
 
-    device_map = "auto"
     world_size = int(os.environ.get("WORLD_SIZE", 1))
-    ddp = world_size != 1
+    ddp = world_size > 1
     local_rank = int(os.environ.get("LOCAL_RANK") or 0)
+    if torch.cuda.is_available():
+        torch.cuda.set_device(local_rank)
     if local_rank == 0:
         print(vars(args))
+        if not ddp:
+            print("Single GPU mode (world_size=1): skipping DDP.")
 
-    if ddp:
-        device_map = {"": local_rank}
+    device_map = {"": local_rank}
 
     config = LlamaConfig.from_pretrained(args.base_model)
     tokenizer = LlamaTokenizer.from_pretrained(
@@ -110,9 +112,9 @@ def train(args):
         model.print_trainable_parameters()
 
 
-    if not ddp and torch.cuda.device_count() > 1:
-        model.is_parallelizable = True
-        model.model_parallel = True
+    # if not ddp and torch.cuda.device_count() > 1:
+    #     model.is_parallelizable = True
+    #     model.model_parallel = True
 
     deepspeed = args.deepspeed
     if deepspeed and str(deepspeed).lower() in ["none", "false", "0", ""]:

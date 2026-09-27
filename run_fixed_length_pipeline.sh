@@ -238,7 +238,7 @@ if [[ -z "$TIGER_GPUS" ]]; then
   TIGER_GPUS="$(detect_available_gpus 2)"
 fi
 if [[ -z "$LCREC_GPUS" ]]; then
-  LCREC_GPUS="$(detect_available_gpus 4)"
+  LCREC_GPUS="$(detect_available_gpus 1)"
 fi
 
 find_latest_checkpoint() {
@@ -412,23 +412,42 @@ if contains_model lcrec; then
   mkdir -p "$(dirname "$LCREC_RESULTS_FILE")"
   (
     cd "$REPO_ROOT/LETTER-LC-Rec"
-    CUDA_VISIBLE_DEVICES="$LCREC_GPUS" torchrun \
-      --nproc_per_node="$(gpu_count "$LCREC_GPUS")" \
-      --master_port=3325 \
-      lora_finetune.py \
-      --base_model "$BASE_MODEL" \
-      --output_dir "$LCREC_CKPT_DIR" \
-      --dataset "$DATASET" \
-      --data_path "$DATA_ROOT" \
-      --per_device_batch_size 16 \
-      --learning_rate 1e-4 \
-      --epochs 4 \
-      --tasks seqrec \
-      --train_prompt_sample_num 1 \
-      --train_data_sample_num 0 \
-      --index_file "$INDEX_SUFFIX" \
-      --wandb_run_name "$LCREC_WANDB_NAME" \
-      --temperature 1.0
+    LCREC_COUNT="$(gpu_count "$LCREC_GPUS")"
+    if [[ "$LCREC_COUNT" -le 1 ]]; then
+      printf '[LC-Rec] Single GPU mode (%s) - skipping DDP for 8-bit quantized training.\n' "$LCREC_GPUS"
+      CUDA_VISIBLE_DEVICES="$LCREC_GPUS" "$PYTHON_BIN" lora_finetune.py \
+        --base_model "$BASE_MODEL" \
+        --output_dir "$LCREC_CKPT_DIR" \
+        --dataset "$DATASET" \
+        --data_path "$DATA_ROOT" \
+        --per_device_batch_size 16 \
+        --learning_rate 1e-4 \
+        --epochs 4 \
+        --tasks seqrec \
+        --train_prompt_sample_num 1 \
+        --train_data_sample_num 0 \
+        --index_file "$INDEX_SUFFIX" \
+        --wandb_run_name "$LCREC_WANDB_NAME" \
+        --temperature 1.0
+    else
+      CUDA_VISIBLE_DEVICES="$LCREC_GPUS" torchrun \
+        --nproc_per_node="$LCREC_COUNT" \
+        --master_port=3325 \
+        lora_finetune.py \
+        --base_model "$BASE_MODEL" \
+        --output_dir "$LCREC_CKPT_DIR" \
+        --dataset "$DATASET" \
+        --data_path "$DATA_ROOT" \
+        --per_device_batch_size 16 \
+        --learning_rate 1e-4 \
+        --epochs 4 \
+        --tasks seqrec \
+        --train_prompt_sample_num 1 \
+        --train_data_sample_num 0 \
+        --index_file "$INDEX_SUFFIX" \
+        --wandb_run_name "$LCREC_WANDB_NAME" \
+        --temperature 1.0
+    fi
   )
   printf 'Completed LETTER-LC-Rec training in %s.\n' "$(format_duration "$((SECONDS - STEP_START))")"
   record_phase "LETTER-LC-Rec training" "$((SECONDS - STEP_START))"
