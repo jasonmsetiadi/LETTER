@@ -10,7 +10,7 @@ try:
         replace_llama_attn_with_flash_attn,
     )
     replace_llama_attn_with_flash_attn()
-except ImportError:
+except Exception:
     pass
 
 import transformers
