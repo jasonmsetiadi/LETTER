@@ -114,6 +114,10 @@ def train(args):
         model.is_parallelizable = True
         model.model_parallel = True
 
+    deepspeed = args.deepspeed
+    if deepspeed and str(deepspeed).lower() in ["none", "false", "0", ""]:
+        deepspeed = None
+
     trainer = transformers.Trainer(
         model=model,
         train_dataset=train_data,
@@ -141,7 +145,7 @@ def train(args):
             output_dir=args.output_dir,
             save_total_limit=1,
             load_best_model_at_end=True,
-            deepspeed=args.deepspeed,
+            deepspeed=deepspeed,
             ddp_find_unused_parameters=False if ddp else None,
             # report_to=None,
             eval_delay=1 if args.save_and_eval_strategy == "epoch" else 2000,
