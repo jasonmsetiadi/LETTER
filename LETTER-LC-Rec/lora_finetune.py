@@ -20,12 +20,9 @@ from peft import (
     TaskType,
     LoraConfig,
     get_peft_model,
+    prepare_model_for_kbit_training,
     set_peft_model_state_dict,
 )
-try:
-    from peft import prepare_model_for_kbit_training as prepare_model_for_int8_training
-except ImportError:
-    from peft import prepare_model_for_int8_training
 
 from transformers import LlamaForCausalLM, LlamaTokenizer, LlamaConfig
 
@@ -74,7 +71,7 @@ def train(args):
     model.set_hyper(args.temperature)
     model.resize_token_embeddings(len(tokenizer))
 
-    model = prepare_model_for_int8_training(model)
+    model = prepare_model_for_kbit_training(model)
     config = LoraConfig(
         r=args.lora_r,
         lora_alpha=args.lora_alpha,
