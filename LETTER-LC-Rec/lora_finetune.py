@@ -151,8 +151,9 @@ def train(args):
     )
     model.config.use_cache = False
 
-    if torch.__version__ >= "2" and sys.platform != "win32":
-        model = torch.compile(model)
+    # torch.compile is incompatible with DeepSpeed ZeRO-2 distributed broadcast and 8-bit quantized LoRA
+    # if torch.__version__ >= "2" and sys.platform != "win32":
+    #     model = torch.compile(model)
 
     trainer.train(
         resume_from_checkpoint=args.resume_from_checkpoint,
