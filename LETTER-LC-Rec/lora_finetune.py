@@ -5,11 +5,13 @@ from typing import List
 # import wandb
 import torch
 from modeling_letter import LETTER
-from fastchat.train.llama2_flash_attn_monkey_patch import (
-    replace_llama_attn_with_flash_attn,
-)
-
-replace_llama_attn_with_flash_attn()
+try:
+    from fastchat.train.llama2_flash_attn_monkey_patch import (
+        replace_llama_attn_with_flash_attn,
+    )
+    replace_llama_attn_with_flash_attn()
+except ImportError:
+    pass
 
 import transformers
 
