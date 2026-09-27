@@ -63,17 +63,40 @@ def train(args):
         tokenizer.save_pretrained(args.output_dir)
         config.save_pretrained(args.output_dir)
 
+    if getattr(args, "load_in_8bit", "auto") == "true":
+        use_8bit = True
+    elif getattr(args, "load_in_8bit", "auto") == "false":
+        use_8bit = False
+    else:
+        # "auto": single-GPU uses 8-bit to minimize memory; multi-GPU DDP uses bfloat16 for clean distributed sync
+        use_8bit = not ddp
+
+    if local_rank == 0:
+        mode_str = f"Multi-GPU DDP (world_size={world_size})" if ddp else "Single-GPU"
+        prec_str = "8-bit quantized (QLoRA)" if use_8bit else "bfloat16 full precision"
+        print(f"[{mode_str}] Model precision: {prec_str}")
+
     collator = Collator(args, tokenizer)
-    model = LETTER.from_pretrained(
-        args.base_model,
-        # torch_dtype=torch.float16,
-        load_in_8bit=True,
-        device_map=device_map,
-    )
+    if use_8bit:
+        model = LETTER.from_pretrained(
+            args.base_model,
+            load_in_8bit=True,
+            device_map=device_map,
+        )
+    else:
+        model = LETTER.from_pretrained(
+            args.base_model,
+            torch_dtype=torch.bfloat16 if args.bf16 else torch.float16,
+            device_map=device_map,
+        )
     model.set_hyper(args.temperature)
     model.resize_token_embeddings(len(tokenizer))
 
-    model = prepare_model_for_kbit_training(model)
+    if use_8bit:
+        model = prepare_model_for_kbit_training(model)
+    else:
+        if hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
     config = LoraConfig(
         r=args.lora_r,
         lora_alpha=args.lora_alpha,

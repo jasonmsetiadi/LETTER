@@ -84,6 +84,8 @@ def parse_train_args(parser):
     parser.add_argument("--fp16",  action="store_true", default=False)
     parser.add_argument("--bf16", action="store_true", default=True)
     parser.add_argument("--deepspeed", type=str, default=None, help="Path to DeepSpeed config, or None for native DDP")
+    parser.add_argument("--load_in_8bit", type=str, default="auto", choices=["auto", "true", "false"],
+                        help="Quantization mode: auto (8-bit on single GPU, bf16 on multi-GPU DDP), true, or false")
     parser.add_argument("--wandb_run_name", type=str, default="default")
     parser.add_argument("--temperature", type=float, default=1.0)
 

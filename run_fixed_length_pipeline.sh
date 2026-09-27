@@ -238,7 +238,7 @@ if [[ -z "$TIGER_GPUS" ]]; then
   TIGER_GPUS="$(detect_available_gpus 2)"
 fi
 if [[ -z "$LCREC_GPUS" ]]; then
-  LCREC_GPUS="$(detect_available_gpus 1)"
+  LCREC_GPUS="$(detect_available_gpus 4)"
 fi
 
 find_latest_checkpoint() {
