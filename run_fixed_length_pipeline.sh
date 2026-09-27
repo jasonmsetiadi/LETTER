@@ -221,6 +221,19 @@ gpu_count() {
   awk -F',' '{ print NF }' <<<"$1"
 }
 
+find_free_port() {
+  local default_port="${1:-29500}"
+  "$PYTHON_BIN" -c '
+import socket, sys
+try:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        print(s.getsockname()[1])
+except Exception:
+    print(sys.argv[1])
+' "$default_port" 2>/dev/null || echo "$default_port"
+}
+
 detect_available_gpus() {
   local max_count="$1"
   "$PYTHON_BIN" -c "
@@ -367,18 +380,33 @@ if contains_model tiger; then
   mkdir -p "$(dirname "$TIGER_RESULTS_FILE")"
   (
     cd "$REPO_ROOT/LETTER-TIGER"
-    CUDA_VISIBLE_DEVICES="$TIGER_GPUS" torchrun \
-      --nproc_per_node="$(gpu_count "$TIGER_GPUS")" \
-      --master_port=2314 \
-      finetune.py \
-      --output_dir "$TIGER_CKPT_DIR" \
-      --dataset "$DATASET" \
-      --data_path "$DATA_ROOT" \
-      --per_device_batch_size 256 \
-      --learning_rate 5e-4 \
-      --epochs 200 \
-      --index_file "$INDEX_SUFFIX" \
-      --temperature 1.0
+    TIGER_COUNT="$(gpu_count "$TIGER_GPUS")"
+    if [[ "$TIGER_COUNT" -le 1 ]]; then
+      printf '[TIGER] Single GPU mode (%s) - running directly without DDP.\n' "$TIGER_GPUS"
+      CUDA_VISIBLE_DEVICES="$TIGER_GPUS" "$PYTHON_BIN" finetune.py \
+        --output_dir "$TIGER_CKPT_DIR" \
+        --dataset "$DATASET" \
+        --data_path "$DATA_ROOT" \
+        --per_device_batch_size 256 \
+        --learning_rate 5e-4 \
+        --epochs 200 \
+        --index_file "$INDEX_SUFFIX" \
+        --temperature 1.0
+    else
+      TIGER_PORT="$(find_free_port 2314)"
+      CUDA_VISIBLE_DEVICES="$TIGER_GPUS" torchrun \
+        --nproc_per_node="$TIGER_COUNT" \
+        --master_port="$TIGER_PORT" \
+        finetune.py \
+        --output_dir "$TIGER_CKPT_DIR" \
+        --dataset "$DATASET" \
+        --data_path "$DATA_ROOT" \
+        --per_device_batch_size 256 \
+        --learning_rate 5e-4 \
+        --epochs 200 \
+        --index_file "$INDEX_SUFFIX" \
+        --temperature 1.0
+    fi
   )
   printf 'Completed LETTER-TIGER training in %s.\n' "$(format_duration "$((SECONDS - STEP_START))")"
   record_phase "LETTER-TIGER training" "$((SECONDS - STEP_START))"
@@ -430,9 +458,10 @@ if contains_model lcrec; then
         --wandb_run_name "$LCREC_WANDB_NAME" \
         --temperature 1.0
     else
+      LCREC_PORT="$(find_free_port 3325)"
       CUDA_VISIBLE_DEVICES="$LCREC_GPUS" torchrun \
         --nproc_per_node="$LCREC_COUNT" \
-        --master_port=3325 \
+        --master_port="$LCREC_PORT" \
         lora_finetune.py \
         --base_model "$BASE_MODEL" \
         --output_dir "$LCREC_CKPT_DIR" \
@@ -458,9 +487,10 @@ if contains_model lcrec; then
     STEP_START="$SECONDS"
     (
       cd "$REPO_ROOT/LETTER-LC-Rec"
+      TEST_PORT="$(find_free_port 4324)"
       CUDA_VISIBLE_DEVICES="$LCREC_GPUS" torchrun \
         --nproc_per_node="$(gpu_count "$LCREC_GPUS")" \
-        --master_port=4324 \
+        --master_port="$TEST_PORT" \
         test_ddp.py \
         --ckpt_path "$LCREC_CKPT_DIR" \
         --base_model "$BASE_MODEL" \
