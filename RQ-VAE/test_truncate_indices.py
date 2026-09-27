@@ -75,6 +75,107 @@ class TruncateIndicesTest(unittest.TestCase):
         self.assertEqual(truncated["2"], ["<a_1>", "<b_2>"])
         self.assertEqual(lengths["2"], 2)
 
+    def test_popularity_strategy_distribution(self):
+        # 4 items with distinct prefixes across layers 1 to 4
+        # Range 1 to 4 -> 4 tiers:
+        # Tier 0 (lowest freq): min_len = 4
+        # Tier 1: min_len = 3
+        # Tier 2: min_len = 2
+        # Tier 3 (highest freq): min_len = 1
+        indices = {
+            "0": ["<a_0>", "<b_0>", "<c_0>", "<d_0>"],  # High freq
+            "1": ["<a_1>", "<b_1>", "<c_1>", "<d_1>"],  # Mid-high freq
+            "2": ["<a_2>", "<b_2>", "<c_2>", "<d_2>"],  # Mid-low freq
+            "3": ["<a_3>", "<b_3>", "<c_3>", "<d_3>"],  # Rare / tail
+        }
+        freqs = {
+            "0": 1000,
+            "1": 100,
+            "2": 10,
+            "3": 1,
+        }
+
+        truncated, lengths = truncate_indices_module.truncate_indices(
+            indices,
+            min_length=1,
+            max_length=4,
+            strategy="popularity",
+            item_frequencies=freqs,
+        )
+
+        # "0" is top tier (rank 3/4 -> tier 3): min_length=1 -> truncated to 1
+        self.assertEqual(lengths["0"], 1)
+        self.assertEqual(truncated["0"], ["<a_0>"])
+
+        # "1" is tier 2 (rank 2/4): min_length=2 -> truncated to 2
+        self.assertEqual(lengths["1"], 2)
+        self.assertEqual(truncated["1"], ["<a_1>", "<b_1>"])
+
+        # "2" is tier 1 (rank 1/4): min_length=3 -> truncated to 3
+        self.assertEqual(lengths["2"], 3)
+        self.assertEqual(truncated["2"], ["<a_2>", "<b_2>", "<c_2>"])
+
+        # "3" is bottom tier (rank 0/4): min_length=4 -> stays at 4
+        self.assertEqual(lengths["3"], 4)
+        self.assertEqual(truncated["3"], ["<a_3>", "<b_3>", "<c_3>", "<d_3>"])
+
+        # All IDs are unique
+        self.assertEqual(len({tuple(tokens) for tokens in truncated.values()}), 4)
+
+    def test_popularity_strategy_requires_frequencies(self):
+        indices = {"0": ["<a_0>", "<b_0>"]}
+        with self.assertRaisesRegex(ValueError, "requires item_frequencies"):
+            truncate_indices_module.truncate_indices(
+                indices, min_length=1, max_length=2, strategy="popularity"
+            )
+
+    def test_residual_strategy(self):
+        # 3 items, each prefix unique at depth 1
+        indices = {
+            "0": ["<a_0>", "<b_0>", "<c_0>", "<d_0>"],
+            "1": ["<a_1>", "<b_1>", "<c_1>", "<d_1>"],
+            "2": ["<a_2>", "<b_2>", "<c_2>", "<d_2>"],
+        }
+        residuals = {
+            # "0" has low error already at depth 1 (0.10 <= 0.20) -> should truncate to 1
+            "0": [0.10, 0.05, 0.02, 0.01],
+            # "1" has high error at depth 1 (0.40), but acceptable at depth 2 (0.15 <= 0.20) -> should truncate to 2
+            "1": [0.40, 0.15, 0.08, 0.02],
+            # "2" has high error at depth 1, 2, and 3 (> 0.20) -> must stay at max_length (4)
+            "2": [0.60, 0.45, 0.25, 0.05],
+        }
+
+        truncated, lengths = truncate_indices_module.truncate_indices(
+            indices,
+            min_length=1,
+            max_length=4,
+            strategy="residual",
+            residuals=residuals,
+            residual_threshold=0.20,
+        )
+
+        self.assertEqual(lengths["0"], 1)
+        self.assertEqual(truncated["0"], ["<a_0>"])
+
+        self.assertEqual(lengths["1"], 2)
+        self.assertEqual(truncated["1"], ["<a_1>", "<b_1>"])
+
+        self.assertEqual(lengths["2"], 4)
+        self.assertEqual(truncated["2"], ["<a_2>", "<b_2>", "<c_2>", "<d_2>"])
+
+    def test_residual_strategy_requires_residuals(self):
+        indices = {"0": ["<a_0>", "<b_0>"]}
+        with self.assertRaisesRegex(ValueError, "requires residuals"):
+            truncate_indices_module.truncate_indices(
+                indices, min_length=1, max_length=2, strategy="residual"
+            )
+
+    def test_unknown_strategy_raises_error(self):
+        indices = {"0": ["<a_0>", "<b_0>"]}
+        with self.assertRaisesRegex(ValueError, "Unknown strategy"):
+            truncate_indices_module.truncate_indices(
+                indices, min_length=1, max_length=2, strategy="invalid_strategy"
+            )
 
 
 if __name__ == "__main__":

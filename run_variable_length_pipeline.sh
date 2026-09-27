@@ -27,14 +27,18 @@ Options:
   --min-length COUNT           Minimum SID length (default: 1)
   --max-length COUNT           Maximum SID length (default: 4)
   --num-layers COUNT           Number of RQ-VAE codebook layers to train (default: max-length)
-  --index-name NAME            Variable index filename (default: <dataset>.index.varlen[.max<k>].json)
+  --strategy NAME              Truncation strategy: shortest_unique, popularity, residual (default: shortest_unique)
+  --inter-file PATH            Interaction JSON for popularity strategy (default: <data-root>/<dataset>/<dataset>.inter.json)
+  --residuals-file PATH        Residuals JSON for residual strategy (default: <data-root>/<dataset>/<dataset>.residuals.json)
+  --residual-threshold VALUE   Reconstruction error threshold for residual strategy (default: 0.2)
+  --index-name NAME            Variable index filename (default: <dataset>.index.varlen[.<strat>][.max<k>].json)
   --overwrite-index            Replace an existing variable index
   --tokenizer-only             Stop after variable-length index generation
   --models LIST                Comma-separated: tiger,lcrec (default: tiger)
   --base-model PATH            Base model for LC-Rec (default: huggyllama/llama-7b)
   --tiger-gpus IDS             CUDA devices for TIGER (default: autodetect, up to 2)
   --lcrec-gpus IDS             CUDA devices for LC-Rec (default: autodetect, up to 4)
-  --results-file PATH          Results JSON path (default: <model>/results/<dataset>/varlen[_max<k>].json)
+  --results-file PATH          Results JSON path (default: <model>/results/<dataset>/varlen[_<strat>][_max<k>].json)
   --skip-evaluation            Train selected recommenders without evaluation
   --python PATH                Python executable (default: python3)
   -h, --help                   Show this help
@@ -83,6 +87,10 @@ BETA="0.0001"
 MIN_LENGTH="1"
 MAX_LENGTH="4"
 NUM_LAYERS=""
+STRATEGY="shortest_unique"
+INTER_FILE=""
+RESIDUALS_FILE=""
+RESIDUAL_THRESHOLD="0.2"
 RESULTS_FILE=""
 INDEX_NAME=""
 MODELS="tiger"
@@ -110,6 +118,10 @@ while [[ $# -gt 0 ]]; do
     --min-length) MIN_LENGTH="$2"; shift 2 ;;
     --max-length) MAX_LENGTH="$2"; shift 2 ;;
     --num-layers) NUM_LAYERS="$2"; shift 2 ;;
+    --strategy) STRATEGY="$2"; shift 2 ;;
+    --inter-file) INTER_FILE="$2"; shift 2 ;;
+    --residuals-file) RESIDUALS_FILE="$2"; shift 2 ;;
+    --residual-threshold) RESIDUAL_THRESHOLD="$2"; shift 2 ;;
     --index-name) INDEX_NAME="$2"; shift 2 ;;
     --models) MODELS="$2"; shift 2 ;;
     --base-model) BASE_MODEL="$2"; shift 2 ;;
@@ -169,13 +181,45 @@ if [[ "$NUM_LAYERS" -lt "$MAX_LENGTH" ]]; then
   exit 2
 fi
 
+STRAT_SUFFIX=""
+STRAT_TAG=""
+case "$STRATEGY" in
+  shortest_unique)
+    STRAT_SUFFIX=""
+    STRAT_TAG=""
+    ;;
+  popularity)
+    STRAT_SUFFIX=".pop"
+    STRAT_TAG="-pop"
+    INTER_FILE="${INTER_FILE:-$DATA_ROOT/$DATASET/$DATASET.inter.json}"
+    if [[ ! -f "$INTER_FILE" ]]; then
+      printf 'Interaction file not found for popularity strategy: %s\n' "$INTER_FILE" >&2
+      exit 1
+    fi
+    ;;
+  residual)
+    STRAT_SUFFIX=".res"
+    STRAT_TAG="-res"
+    RESIDUALS_FILE="${RESIDUALS_FILE:-$DATA_ROOT/$DATASET/$DATASET.residuals.json}"
+    if [[ ! -f "$RESIDUALS_FILE" ]]; then
+      printf 'Residuals file not found for residual strategy: %s\n' "$RESIDUALS_FILE" >&2
+      printf 'Generate it first using RQ-VAE/compute_residuals.py.\n' >&2
+      exit 1
+    fi
+    ;;
+  *)
+    printf 'Unknown strategy: %s (choose shortest_unique, popularity, or residual)\n' "$STRATEGY" >&2
+    exit 2
+    ;;
+esac
+
 if [[ -z "$INDEX_NAME" ]]; then
   if [[ "$MAX_LENGTH" -eq 4 && "$MIN_LENGTH" -eq 1 ]]; then
-    INDEX_NAME="$DATASET.index.varlen.json"
+    INDEX_NAME="$DATASET.index.varlen${STRAT_SUFFIX}.json"
   elif [[ "$MIN_LENGTH" -eq 1 ]]; then
-    INDEX_NAME="$DATASET.index.varlen.max${MAX_LENGTH}.json"
+    INDEX_NAME="$DATASET.index.varlen${STRAT_SUFFIX}.max${MAX_LENGTH}.json"
   else
-    INDEX_NAME="$DATASET.index.varlen.min${MIN_LENGTH}-max${MAX_LENGTH}.json"
+    INDEX_NAME="$DATASET.index.varlen${STRAT_SUFFIX}.min${MIN_LENGTH}-max${MAX_LENGTH}.json"
   fi
 fi
 INDEX_FILE="$DATA_ROOT/$DATASET/$INDEX_NAME"
@@ -189,21 +233,21 @@ fi
 FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/$FIXED_INDEX_NAME"
 
 if [[ "$MAX_LENGTH" -eq 4 && "$MIN_LENGTH" -eq 1 ]]; then
-  TIGER_CKPT_DIR="./ckpt/$DATASET-varlen"
-  LCREC_CKPT_DIR="./ckpt/$DATASET-varlen"
-  TIGER_DEFAULT_RESULTS="./results/$DATASET/varlen.json"
-  LCREC_DEFAULT_RESULTS="./results/$DATASET/varlen.json"
-  LCREC_WANDB_NAME="${DATASET}-varlen"
+  TIGER_CKPT_DIR="./ckpt/$DATASET-varlen${STRAT_TAG}"
+  LCREC_CKPT_DIR="./ckpt/$DATASET-varlen${STRAT_TAG}"
+  TIGER_DEFAULT_RESULTS="./results/$DATASET/varlen${STRAT_TAG}.json"
+  LCREC_DEFAULT_RESULTS="./results/$DATASET/varlen${STRAT_TAG}.json"
+  LCREC_WANDB_NAME="${DATASET}-varlen${STRAT_TAG}"
 else
   TAG="max${MAX_LENGTH}"
   if [[ "$MIN_LENGTH" -ne 1 ]]; then
     TAG="min${MIN_LENGTH}-max${MAX_LENGTH}"
   fi
-  TIGER_CKPT_DIR="./ckpt/$DATASET-varlen-${TAG}"
-  LCREC_CKPT_DIR="./ckpt/$DATASET-varlen-${TAG}"
-  TIGER_DEFAULT_RESULTS="./results/$DATASET/varlen_${TAG}.json"
-  LCREC_DEFAULT_RESULTS="./results/$DATASET/varlen_${TAG}.json"
-  LCREC_WANDB_NAME="${DATASET}-varlen-${TAG}"
+  TIGER_CKPT_DIR="./ckpt/$DATASET-varlen${STRAT_TAG}-${TAG}"
+  LCREC_CKPT_DIR="./ckpt/$DATASET-varlen${STRAT_TAG}-${TAG}"
+  TIGER_DEFAULT_RESULTS="./results/$DATASET/varlen${STRAT_TAG}_${TAG}.json"
+  LCREC_DEFAULT_RESULTS="./results/$DATASET/varlen${STRAT_TAG}_${TAG}.json"
+  LCREC_WANDB_NAME="${DATASET}-varlen${STRAT_TAG}-${TAG}"
 fi
 TIGER_RESULTS_FILE="${RESULTS_FILE:-$TIGER_DEFAULT_RESULTS}"
 LCREC_RESULTS_FILE="${RESULTS_FILE:-$LCREC_DEFAULT_RESULTS}"
@@ -361,13 +405,22 @@ else
     printf 'Stored intermediate fixed-length index: %s\n' "$FIXED_INDEX_FILE"
   fi
 
-  printf '\n[Variable index] Creating the variable-length item index...\n'
+  printf '\n[Variable index] Creating the variable-length item index (%s)...\n' "$STRATEGY"
   STEP_START="$SECONDS"
-  "$PYTHON_BIN" "$REPO_ROOT/RQ-VAE/truncate_indices.py" \
-    --input "$FIXED_INDEX_FILE" \
-    --output "$INDEX_FILE" \
-    --min-length "$MIN_LENGTH" \
+  truncate_args=(
+    "$REPO_ROOT/RQ-VAE/truncate_indices.py"
+    --input "$FIXED_INDEX_FILE"
+    --output "$INDEX_FILE"
+    --min-length "$MIN_LENGTH"
     --max-length "$MAX_LENGTH"
+    --strategy "$STRATEGY"
+  )
+  if [[ "$STRATEGY" == "popularity" ]]; then
+    truncate_args+=(--inter-file "$INTER_FILE")
+  elif [[ "$STRATEGY" == "residual" ]]; then
+    truncate_args+=(--residuals-file "$RESIDUALS_FILE" --residual-threshold "$RESIDUAL_THRESHOLD")
+  fi
+  "$PYTHON_BIN" "${truncate_args[@]}"
 
   if [[ ! -f "$INDEX_FILE" ]]; then
     printf 'Variable-length index generation completed without creating: %s\n' "$INDEX_FILE" >&2
