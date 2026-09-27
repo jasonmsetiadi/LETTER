@@ -128,7 +128,7 @@ def train(args):
             learning_rate=args.learning_rate,
             weight_decay=args.weight_decay,
             lr_scheduler_type=args.lr_scheduler_type,
-            report_to=['wandb'],
+            report_to='none',
             fp16=args.fp16,
             bf16=args.bf16,
             logging_steps=args.logging_step,
