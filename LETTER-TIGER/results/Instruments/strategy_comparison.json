@@ -15,9 +15,9 @@
   },
   {
     "strategy": "shortest_unique",
-    "mean_length": null,
-    "weighted_length": null,
-    "collisions": 0,
+    "mean_length": 3.0131021971376737,
+    "weighted_length": 3.1598715517115927,
+    "collisions": 25,
     "metrics": {
       "hit@1": 0.05663652510899402,
       "hit@5": 0.07742612627159697,
@@ -98,11 +98,31 @@
     "status": "completed"
   },
   {
+    "strategy": "popularity:cf_density",
+    "mean_length": 3.2784720822414837,
+    "weighted_length": 3.333805474574709,
+    "collisions": 25,
+    "metrics": {
+      "hit@1": 0.05708057484256419,
+      "hit@5": 0.07992895204262877,
+      "hit@10": 0.09999192636848055,
+      "ndcg@5": 0.06864689790033986,
+      "ndcg@10": 0.07511451613643448
+    },
+    "status": "completed"
+  },
+  {
     "strategy": "residual",
-    "mean_length": null,
-    "weighted_length": null,
-    "collisions": 0,
-    "metrics": {},
-    "status": "pending"
+    "mean_length": 3.9955654101995566,
+    "weighted_length": 3.9948436355522357,
+    "collisions": 25,
+    "metrics": {
+      "hit@1": 0.0611577587598902,
+      "hit@5": 0.08598417568222186,
+      "hit@10": 0.10673340868722751,
+      "ndcg@5": 0.07362510146160803,
+      "ndcg@10": 0.08025200360665648
+    },
+    "status": "completed"
   }
 ]
