@@ -58,8 +58,16 @@ def file_to_strategy(filename, tag=""):
     if not filename.endswith(".json") or filename.startswith("strategy_comparison"):
         return None
     stem = filename[:-5]
-    if tag and stem.endswith(tag):
+    if tag:
+        if not stem.endswith(tag):
+            expected_fixed = f"fixed_L{tag.lstrip('_max')}" if tag.startswith("_max") else None
+            if expected_fixed and stem == expected_fixed:
+                return "fixed"
+            return None
         stem = stem[:-len(tag)]
+    else:
+        if "_max" in stem or "_min" in stem or (stem.startswith("fixed_L") and stem != "fixed_L4"):
+            return None
     if stem == "fixed" or stem.startswith("fixed_L"):
         return "fixed"
     if stem == "varlen":
@@ -129,14 +137,14 @@ def main():
     raw_models = args.models.replace(",", " ").split()
     models = [m.strip().lower() for m in raw_models if m.strip()]
 
-    tag = "" if (max_length == 4 and min_length == 1) else f"_max{max_length}"
+    tag = "" if (max_length == 4 and min_length == 1) else (f"_max{max_length}" if min_length == 1 else f"_min{min_length}-max{max_length}")
 
     for model in models:
         model_name = "LETTER-TIGER" if model == "tiger" else "LETTER-LC-Rec"
         model_dir = "LETTER-TIGER" if model == "tiger" else "LETTER-LC-Rec"
         report_dir = os.path.join(repo_root, model_dir, "results", dataset)
         os.makedirs(report_dir, exist_ok=True)
-        report_json = os.path.join(report_dir, "strategy_comparison.json")
+        report_json = os.path.join(report_dir, f"strategy_comparison{tag}.json")
 
         existing_entries = {}
         existing_sid_entries = {}
@@ -513,7 +521,7 @@ def main():
         print(summary_text)
 
         # Save Text report
-        report_txt = os.path.join(report_dir, "strategy_comparison.txt")
+        report_txt = os.path.join(report_dir, f"strategy_comparison{tag}.txt")
         with open(report_txt, "w", encoding="utf-8") as f:
             f.write(summary_text + "\n")
 
@@ -653,7 +661,7 @@ def main():
                 md_lines.append(f"| **{s1}** | " + " | ".join(row_vals) + " |")
 
         # Save Markdown report
-        report_md = os.path.join(report_dir, "strategy_comparison.md")
+        report_md = os.path.join(report_dir, f"strategy_comparison{tag}.md")
         with open(report_md, "w", encoding="utf-8") as f:
             f.write("\n".join(md_lines) + "\n")
 

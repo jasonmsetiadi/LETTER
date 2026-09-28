@@ -199,9 +199,19 @@ def evaluate_semantic_ids(
     dataset_dir = data_root / dataset
 
     if index_file is None:
-        index_file = dataset_dir / f"{dataset}.index.json"
-        if not index_file.exists():
-            index_file = dataset_dir / f"{dataset}.index.fixed-for-varlen.json"
+        if max_length != 4:
+            cand_list = [
+                dataset_dir / f"{dataset}.index.fixed-for-varlen.L{max_length}.json",
+                dataset_dir / f"{dataset}.index.fixed.L{max_length}.json",
+                dataset_dir / f"{dataset}.index.fixed.json",
+                dataset_dir / f"{dataset}.index.fixed-for-varlen.json",
+                dataset_dir / f"{dataset}.index.json",
+            ]
+            index_file = next((c for c in cand_list if c.exists()), cand_list[-1])
+        else:
+            index_file = dataset_dir / f"{dataset}.index.json"
+            if not index_file.exists():
+                index_file = dataset_dir / f"{dataset}.index.fixed-for-varlen.json"
     index_file = Path(index_file)
     if not index_file.exists():
         raise FileNotFoundError(f"Index file not found: {index_file}")
@@ -564,8 +574,9 @@ def main():
     else:
         out_dir = repo_root / "LETTER-TIGER" / "results" / args.dataset
 
-    default_md = out_dir / "semantic_id_comparison.md"
-    default_json = out_dir / "semantic_id_comparison.json"
+    rep_tag = "" if (args.max_length == 4 and args.min_length == 1) else (f"_max{args.max_length}" if args.min_length == 1 else f"_min{args.min_length}-max{args.max_length}")
+    default_md = out_dir / f"semantic_id_comparison{rep_tag}.md"
+    default_json = out_dir / f"semantic_id_comparison{rep_tag}.json"
 
     out_md = None if args.no_save_report else (Path(args.output_markdown) if args.output_markdown else default_md)
     out_json = None if args.no_save_report else (Path(args.output_json) if args.output_json else default_json)
