@@ -43,6 +43,7 @@ Options:
   --tokenizer-only             Only generate tokenizers & indices, skip downstream training
   --skip-evaluation            Train recommenders without evaluating
   --summary-only               Only generate and print the comparison summary table from existing results
+  --reset-comparison           Overwrite strategy comparison report without merging existing results
   --python PATH                Python executable (default: python3)
   -h, --help                   Show this help
 EOF
@@ -87,6 +88,7 @@ OVERWRITE_INDEX=false
 TOKENIZER_ONLY=false
 SKIP_EVALUATION=false
 SUMMARY_ONLY=false
+RESET_COMPARISON=false
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 while [[ $# -gt 0 ]]; do
@@ -118,6 +120,7 @@ while [[ $# -gt 0 ]]; do
     --tokenizer-only) TOKENIZER_ONLY=true; shift ;;
     --skip-evaluation) SKIP_EVALUATION=true; shift ;;
     --summary-only) SUMMARY_ONLY=true; shift ;;
+    --reset-comparison|--no-merge) RESET_COMPARISON=true; shift ;;
     --python) PYTHON_BIN="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'Unknown argument: %s\n' "$1" >&2; usage >&2; exit 2 ;;
@@ -416,14 +419,20 @@ if candidates:
 fi
 
 # --- Consolidated Comparison Table Generation ---
-"$PYTHON_BIN" "$REPO_ROOT/RQ-VAE/generate_comparison_report.py" \
-  --dataset "$DATASET" \
-  --repo-root "$REPO_ROOT" \
-  --data-root "$DATA_ROOT" \
-  --max-length "$MAX_LENGTH" \
-  --min-length "$MIN_LENGTH" \
-  --strategies "${STRATEGIES[*]}" \
+report_cmd=(
+  "$PYTHON_BIN" "$REPO_ROOT/RQ-VAE/generate_comparison_report.py"
+  --dataset "$DATASET"
+  --repo-root "$REPO_ROOT"
+  --data-root "$DATA_ROOT"
+  --max-length "$MAX_LENGTH"
+  --min-length "$MIN_LENGTH"
+  --strategies "${STRATEGIES[*]}"
   --models "$MODELS"
+)
+if [[ "$RESET_COMPARISON" == true ]]; then
+  report_cmd+=(--no-merge)
+fi
+"${report_cmd[@]}"
 
 printf '\nExperiment finished in %s.\n' \
   "$(format_duration "$((SECONDS - EXPERIMENT_START))")"

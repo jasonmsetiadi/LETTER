@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+from collections import Counter
 from pathlib import Path
 
 
@@ -35,7 +36,62 @@ def parse_args():
         default="tiger",
         help="Comma-separated list of models (e.g. tiger,lcrec).",
     )
+    parser.add_argument(
+        "--no-merge",
+        action="store_true",
+        help="Do not merge with existing strategy_comparison.json or auto-discover existing result files.",
+    )
     return parser.parse_args()
+
+
+def file_to_strategy(filename, tag=""):
+    """Infer strategy name from result JSON filename."""
+    if not filename.endswith(".json") or filename.startswith("strategy_comparison"):
+        return None
+    stem = filename[:-5]
+    if tag and stem.endswith(tag):
+        stem = stem[:-len(tag)]
+    if stem == "fixed" or stem.startswith("fixed_L"):
+        return "fixed"
+    if stem == "varlen":
+        return "shortest_unique"
+    if stem == "varlen-res":
+        return "residual"
+    if stem == "varlen-pop":
+        return "popularity:frequency"
+    if stem.startswith("varlen-pop-"):
+        sig = stem[len("varlen-pop-"):]
+        alias = {"entropy": "user_entropy", "pr": "pagerank", "cf": "cf_density"}
+        return f"popularity:{alias.get(sig, sig)}"
+    return None
+
+
+def strategy_sort_key(strat_name):
+    """Sort order: fixed -> shortest_unique -> popularity signals -> residual -> others."""
+    if strat_name == "fixed":
+        return (0, 0, strat_name)
+    if strat_name == "shortest_unique":
+        return (1, 0, strat_name)
+    if strat_name.startswith("popularity") or strat_name.startswith("collaborative"):
+        sig = strat_name.split(":", 1)[1] if ":" in strat_name else "frequency"
+        collab_order = {
+            "frequency": 1,
+            "raw": 1,
+            "pop": 1,
+            "user_entropy": 2,
+            "entropy": 2,
+            "pagerank": 3,
+            "pr": 3,
+            "target": 4,
+            "target_frequency": 4,
+            "composite": 5,
+            "cf_density": 6,
+            "cf_isolation": 6,
+        }
+        return (2, collab_order.get(sig, 50), strat_name)
+    if strat_name == "residual":
+        return (3, 0, strat_name)
+    return (4, 0, strat_name)
 
 
 def main():
@@ -58,13 +114,62 @@ def main():
     for model in models:
         model_name = "LETTER-TIGER" if model == "tiger" else "LETTER-LC-Rec"
         model_dir = "LETTER-TIGER" if model == "tiger" else "LETTER-LC-Rec"
+        report_dir = os.path.join(repo_root, model_dir, "results", dataset)
+        os.makedirs(report_dir, exist_ok=True)
+        report_json = os.path.join(report_dir, "strategy_comparison.json")
+
+        existing_entries = {}
+        if not args.no_merge and os.path.isfile(report_json):
+            try:
+                with open(report_json) as f:
+                    prev_list = json.load(f)
+                for item in prev_list:
+                    if isinstance(item, dict) and "strategy" in item:
+                        s_name = item["strategy"]
+                        if s_name == "popularity":
+                            s_name = "popularity:frequency"
+                        existing_entries[s_name] = item
+            except Exception:
+                pass
+
+        discovered_strategies = []
+        if not args.no_merge and os.path.isdir(report_dir):
+            for fname in sorted(os.listdir(report_dir)):
+                s = file_to_strategy(fname, tag)
+                if s and s not in discovered_strategies:
+                    discovered_strategies.append(s)
+
+        # Build comprehensive list of strategies:
+        # 1) Start with user-requested strategies (normalizing 'popularity' -> 'popularity:frequency' if collab signals used)
+        has_collab_expanded = any(
+            k.startswith("popularity:") and k != "popularity:frequency"
+            for k in list(existing_entries.keys()) + discovered_strategies
+        )
+        combined_strategies = []
+        for s in strategies:
+            norm_s = "popularity:frequency" if (s == "popularity" and has_collab_expanded) else s
+            if norm_s not in combined_strategies:
+                combined_strategies.append(norm_s)
+
+        # 2) Include discovered result files
+        for s in discovered_strategies:
+            if s not in combined_strategies:
+                combined_strategies.append(s)
+
+        # 3) Include previous report entries
+        for s in existing_entries:
+            if s not in combined_strategies:
+                combined_strategies.append(s)
+
+        # Sort canonically
+        combined_strategies.sort(key=strategy_sort_key)
 
         table_data = []
-        fixed_metrics = None
 
-        for strat in strategies:
+        for strat in combined_strategies:
             idx_summary_file = None
             res_file = None
+            file_tag = "pop"
 
             if strat == "fixed":
                 idx_summary_file = os.path.join(
@@ -134,6 +239,7 @@ def main():
             w_mean_l = float(max_length) if strat == "fixed" else None
             collisions = 0
 
+            # 1) Try reading from summary JSON file
             if idx_summary_file and os.path.isfile(idx_summary_file):
                 try:
                     with open(idx_summary_file) as f:
@@ -144,16 +250,13 @@ def main():
                 except Exception:
                     pass
             elif strat != "fixed":
-                # Fallback: inspect index file directly if summary file is missing
-                actual_idx_name = (
-                    f"{dataset}.index.varlen{tag}.json"
-                    if strat == "shortest_unique"
-                    else (
-                        f"{dataset}.index.varlen.pop{tag}.json"
-                        if strat == "popularity"
-                        else f"{dataset}.index.varlen.res{tag}.json"
-                    )
-                )
+                # Fallback: inspect actual index file directly
+                if strat == "shortest_unique":
+                    actual_idx_name = f"{dataset}.index.varlen{tag}.json"
+                elif strat == "residual":
+                    actual_idx_name = f"{dataset}.index.varlen.res{tag}.json"
+                else:
+                    actual_idx_name = f"{dataset}.index.varlen.{file_tag}{tag}.json"
                 actual_idx_file = os.path.join(data_root, dataset, actual_idx_name)
                 if os.path.isfile(actual_idx_file):
                     try:
@@ -166,21 +269,18 @@ def main():
                     except Exception:
                         pass
 
+            # 2) Fallback for weighted mean length
             if w_mean_l is None and strat != "fixed":
-                actual_idx_name = (
-                    f"{dataset}.index.varlen{tag}.json"
-                    if strat == "shortest_unique"
-                    else (
-                        f"{dataset}.index.varlen.pop{tag}.json"
-                        if strat == "popularity"
-                        else f"{dataset}.index.varlen.res{tag}.json"
-                    )
-                )
+                if strat == "shortest_unique":
+                    actual_idx_name = f"{dataset}.index.varlen{tag}.json"
+                elif strat == "residual":
+                    actual_idx_name = f"{dataset}.index.varlen.res{tag}.json"
+                else:
+                    actual_idx_name = f"{dataset}.index.varlen.{file_tag}{tag}.json"
                 idx_path = os.path.join(data_root, dataset, actual_idx_name)
                 inter_path = os.path.join(data_root, dataset, f"{dataset}.inter.json")
                 if os.path.isfile(idx_path) and os.path.isfile(inter_path):
                     try:
-                        from collections import Counter
                         with open(inter_path) as int_f:
                             idata = json.load(int_f)
                         freqs = Counter()
@@ -207,10 +307,21 @@ def main():
                         rdata = json.load(f)
                     metrics = rdata.get("mean_results", {})
                     status = "completed"
-                    if strat == "fixed":
-                        fixed_metrics = metrics
                 except Exception:
                     status = "error"
+
+            # 3) Fallback / merge from existing entries in strategy_comparison.json
+            if strat in existing_entries:
+                prev_row = existing_entries[strat]
+                if status != "completed" and prev_row.get("status") == "completed":
+                    metrics = prev_row.get("metrics", {})
+                    status = "completed"
+                if mean_l is None and prev_row.get("mean_length") is not None:
+                    mean_l = prev_row["mean_length"]
+                if w_mean_l is None and prev_row.get("weighted_length") is not None:
+                    w_mean_l = prev_row["weighted_length"]
+                if collisions == 0 and prev_row.get("collisions", 0) > 0:
+                    collisions = prev_row["collisions"]
 
             table_data.append({
                 "strategy": strat,
@@ -221,16 +332,27 @@ def main():
                 "status": status,
             })
 
-        row_fmt = "| {:<16} | {:<8} | {:<10} | {:<6} | {:<8} | {:<8} | {:<8} | {:<8} | {:<8} |"
-        sep = "+------------------+----------+------------+--------+----------+----------+----------+----------+----------+"
+        # Locate fixed baseline metrics if present
+        fixed_metrics = None
+        for row in table_data:
+            if row["strategy"] == "fixed" and row["status"] == "completed":
+                fixed_metrics = row["metrics"]
+                break
+
+        # Dynamically size the strategy column for alignment
+        max_s_len = max([len(r["strategy"]) for r in table_data] + [len("Strategy")])
+        strat_col_w = max(22, max_s_len)
+        row_fmt = f"| {{:<{strat_col_w}}} | {{:<8}} | {{:<10}} | {{:<6}} | {{:<8}} | {{:<8}} | {{:<8}} | {{:<8}} | {{:<8}} |"
+        sep = f"+{'-' * (strat_col_w + 2)}+----------+------------+--------+----------+----------+----------+----------+----------+"
         header = row_fmt.format(
             "Strategy", "Mean L", "W-Mean L", "Coll.", "Hit@1", "Hit@5", "Hit@10", "NDCG@5", "NDCG@10"
         )
+        table_width = len(sep)
 
         lines = [
-            "\n" + "=" * 99,
+            "\n" + "=" * table_width,
             f" STRATEGY COMPARISON EXPERIMENT: {model_name} ({dataset})",
-            "=" * 99,
+            "=" * table_width,
             header,
             sep,
         ]
@@ -262,8 +384,8 @@ def main():
                             return f"{diff:+.1f}%"
                         return "-"
 
-                    d_ml = f"{((ml_val - max_length) / max_length * 100):+.1f}%" if ml_val else ""
-                    d_wml = f"{((wml_val - max_length) / max_length * 100):+.1f}%" if wml_val else ""
+                    d_ml = f"{((ml_val - max_length) / max_length * 100):+.1f}%" if ml_val is not None else ""
+                    d_wml = f"{((wml_val - max_length) / max_length * 100):+.1f}%" if wml_val is not None else ""
                     dh1 = get_delta("hit@1")
                     dh5 = get_delta("hit@5")
                     dh10 = get_delta("hit@10")
@@ -280,13 +402,10 @@ def main():
         print(summary_text)
 
         # Save reports
-        report_dir = os.path.join(repo_root, model_dir, "results", dataset)
-        os.makedirs(report_dir, exist_ok=True)
         report_txt = os.path.join(report_dir, "strategy_comparison.txt")
         with open(report_txt, "w") as f:
             f.write(summary_text + "\n")
 
-        report_json = os.path.join(report_dir, "strategy_comparison.json")
         with open(report_json, "w") as f:
             json.dump(table_data, f, indent=2)
 

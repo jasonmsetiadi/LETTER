@@ -1,5 +1,33 @@
 [
   {
+    "strategy": "fixed",
+    "mean_length": 4.0,
+    "weighted_length": 4.0,
+    "collisions": 0,
+    "metrics": {
+      "hit@1": 0.05962376877119328,
+      "hit@5": 0.08509607621508154,
+      "hit@10": 0.10592604553528177,
+      "ndcg@5": 0.07242907104808712,
+      "ndcg@10": 0.0791127089110418
+    },
+    "status": "completed"
+  },
+  {
+    "strategy": "shortest_unique",
+    "mean_length": null,
+    "weighted_length": null,
+    "collisions": 0,
+    "metrics": {
+      "hit@1": 0.05663652510899402,
+      "hit@5": 0.07742612627159697,
+      "hit@10": 0.09526885192959793,
+      "ndcg@5": 0.06712102704168063,
+      "ndcg@10": 0.0728133179242925
+    },
+    "status": "completed"
+  },
+  {
     "strategy": "popularity:frequency",
     "mean_length": 3.2885506954243096,
     "weighted_length": 3.232405058378971,
@@ -68,5 +96,13 @@
       "ndcg@10": 0.07192025665649697
     },
     "status": "completed"
+  },
+  {
+    "strategy": "residual",
+    "mean_length": null,
+    "weighted_length": null,
+    "collisions": 0,
+    "metrics": {},
+    "status": "pending"
   }
 ]
