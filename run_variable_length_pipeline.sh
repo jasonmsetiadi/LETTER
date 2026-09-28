@@ -29,7 +29,7 @@ Options:
   --num-layers COUNT           Number of RQ-VAE codebook layers to train (default: max-length)
   --strategy NAME              Truncation strategy: shortest_unique, popularity, collaborative, residual (default: shortest_unique)
   --collab-signal SIGNAL       Collaborative signal for popularity/collaborative:
-                               frequency, user_entropy, pagerank, target, cf_density (default: frequency)
+                               frequency, user_entropy, pagerank, target, co_occurrence, cf_density (default: frequency)
   --inter-file PATH            Interaction JSON for popularity strategy (default: <data-root>/<dataset>/<dataset>.inter.json)
   --cf-emb-file PATH           Path to CF embeddings (.pt, .npy) for cf_density signal
   --residuals-file PATH        Residuals JSON for residual strategy (default: <data-root>/<dataset>/<dataset>.residuals.json)
@@ -216,12 +216,16 @@ case "$STRATEGY" in
         STRAT_SUFFIX=".pop-target"
         STRAT_TAG="-pop-target"
         ;;
+      co_occurrence|cooccurrence|cooccur|co_occur)
+        STRAT_SUFFIX=".pop-cooccur"
+        STRAT_TAG="-pop-cooccur"
+        ;;
       cf_density|cf_isolation)
         STRAT_SUFFIX=".pop-cf"
         STRAT_TAG="-pop-cf"
         ;;
       *)
-        printf 'Unknown collaborative signal: %s (choose frequency, user_entropy, pagerank, target, cf_density)\n' "$COLLAB_SIGNAL" >&2
+        printf 'Unknown collaborative signal: %s (choose frequency, user_entropy, pagerank, target, co_occurrence, cf_density)\n' "$COLLAB_SIGNAL" >&2
         exit 2
         ;;
     esac

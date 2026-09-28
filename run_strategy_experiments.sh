@@ -24,7 +24,7 @@ Options:
   --inter-file PATH            Interaction JSON for popularity strategy
                                (default: <data-root>/<dataset>/<dataset>.inter.json)
   --collab-signal SIGNAL       Collaborative signal for popularity/collaborative:
-                               frequency, user_entropy, pagerank, target, cf_density (default: frequency)
+                               frequency, user_entropy, pagerank, target, co_occurrence, cf_density (default: frequency)
   --cf-emb-file PATH           Path to CF embeddings (.pt, .npy) for cf_density signal
   --residuals-file PATH        Residuals JSON for residual strategy
                                (default: <data-root>/<dataset>/<dataset>.residuals.json)
@@ -150,7 +150,7 @@ IFS=', ' read -r -a RAW_STRATEGIES <<< "$STRATEGIES_STR"
 for S in "${RAW_STRATEGIES[@]}"; do
   if [[ "$S" == "popularity" || "$S" == "collaborative" ]] && [[ -n "$COLLAB_SIGNALS_STR" ]]; then
     if [[ "$COLLAB_SIGNALS_STR" == "all" ]]; then
-      SIG_LIST=("frequency" "user_entropy" "pagerank" "target")
+      SIG_LIST=("frequency" "user_entropy" "pagerank" "target" "co_occurrence")
       if [[ -n "$CF_EMB_FILE" ]]; then SIG_LIST+=("cf_density"); fi
     else
       IFS=', ' read -r -a SIG_LIST <<< "$COLLAB_SIGNALS_STR"
@@ -207,6 +207,7 @@ get_result_path() {
         user_entropy|entropy) pop_tag="-pop-entropy" ;;
         pagerank|pr) pop_tag="-pop-pagerank" ;;
         target|target_frequency) pop_tag="-pop-target" ;;
+        co_occurrence|cooccur|co_occur) pop_tag="-pop-cooccur" ;;
         cf_density) pop_tag="-pop-cf" ;;
         *) pop_tag="-pop-$sig" ;;
       esac

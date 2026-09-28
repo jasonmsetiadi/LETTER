@@ -272,6 +272,19 @@ class TruncateIndicesTest(unittest.TestCase):
         # Item 1 should have the shortest length
         self.assertEqual(lengths["1"], 1)
 
+    def test_collaborative_co_occurrence_signal(self):
+        inter_data = {
+            "u0": ["0", "1", "2"],
+            "u1": ["0", "3"],
+            "u2": ["4", "5"],
+        }
+        scores, _ = truncate_indices_module.compute_interaction_signals(
+            inter_data, signal="co_occurrence"
+        )
+        self.assertEqual(scores["0"], 3.0)  # co-occurs with 1, 2, 3
+        self.assertEqual(scores["4"], 1.0)  # co-occurs with 5
+        self.assertGreater(scores["0"], scores["4"])
+
 
 if __name__ == "__main__":
     unittest.main()

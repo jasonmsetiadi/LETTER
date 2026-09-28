@@ -70,9 +70,16 @@ def file_to_strategy(filename, tag=""):
         return "popularity:frequency"
     if stem.startswith("varlen-pop-"):
         sig = stem[len("varlen-pop-"):]
-        alias = {"entropy": "user_entropy", "pr": "pagerank", "cf": "cf_density"}
+        alias = {
+            "entropy": "user_entropy",
+            "pr": "pagerank",
+            "cooccur": "co_occurrence",
+            "co_occur": "co_occurrence",
+            "cooccurrence": "co_occurrence",
+            "cf": "cf_density",
+        }
         norm_sig = alias.get(sig, sig)
-        valid_sigs = {"frequency", "user_entropy", "pagerank", "target", "cf_density"}
+        valid_sigs = {"frequency", "user_entropy", "pagerank", "target", "co_occurrence", "cf_density"}
         if norm_sig in valid_sigs:
             return f"popularity:{norm_sig}"
         return None
@@ -97,8 +104,11 @@ def strategy_sort_key(strat_name):
             "pr": 3,
             "target": 4,
             "target_frequency": 4,
-            "cf_density": 5,
-            "cf_isolation": 5,
+            "co_occurrence": 5,
+            "cooccurrence": 5,
+            "cooccur": 5,
+            "cf_density": 6,
+            "cf_isolation": 6,
         }
         return (2, collab_order.get(sig, 50), strat_name)
     if strat_name == "residual":
@@ -244,6 +254,9 @@ def main():
                     "pr": ("pop-pagerank", "-pop-pagerank"),
                     "target": ("pop-target", "-pop-target"),
                     "target_frequency": ("pop-target", "-pop-target"),
+                    "co_occurrence": ("pop-cooccur", "-pop-cooccur"),
+                    "cooccurrence": ("pop-cooccur", "-pop-cooccur"),
+                    "cooccur": ("pop-cooccur", "-pop-cooccur"),
                     "cf_density": ("pop-cf", "-pop-cf"),
                 }
                 _, res_tag = sig_map.get(sig, (f"pop-{sig}", f"-pop-{sig}"))

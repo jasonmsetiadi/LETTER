@@ -153,6 +153,8 @@ def compute_interaction_signals(
                   directly optimizing inference-time generation tokens.
       - 'pagerank': Stationary distribution on the sequential transition graph.
                     Identifies global transition hubs across recommendation paths.
+      - 'co_occurrence': Degree/breadth of unique co-occurring catalog items across user sessions.
+                        Identifies universal basket-companion items.
       - 'cf_density': Latent manifold isolation (1 - k-NN crowd density).
                       Requires cf_emb_file.
     """
@@ -169,6 +171,7 @@ def compute_interaction_signals(
     target_counts = defaultdict(int)
     transitions = defaultdict(lambda: defaultdict(int))
     out_degrees = defaultdict(int)
+    cooccur_sets = defaultdict(set)
     has_user_sequences = False
 
     for k, v in data.items():
@@ -178,6 +181,9 @@ def compute_interaction_signals(
             if len(seq) == 0:
                 continue
             target_counts[str(seq[-1])] += 1
+            unique_in_seq = set(str(item) for item in seq)
+            for it in unique_in_seq:
+                cooccur_sets[it].update(unique_in_seq - {it})
             for idx, item in enumerate(seq):
                 item_str = str(item)
                 raw_freqs[item_str] += 1
@@ -241,13 +247,19 @@ def compute_interaction_signals(
                 break
         return pr, dict(raw_freqs)
 
+    if canonical_signal in ("co_occurrence", "cooccurrence", "cooccur", "co_occur"):
+        if not has_user_sequences:
+            return dict(raw_freqs), dict(raw_freqs)
+        scores = {item: float(len(cooccur_sets.get(item, set()))) for item in raw_freqs}
+        return scores, dict(raw_freqs)
+
     if canonical_signal in ("cf_density", "cf_isolation"):
         if not cf_emb_file:
             raise ValueError("signal='cf_density' requires cf_emb_file to be specified.")
         scores = compute_cf_density_scores(cf_emb_file, top_k=top_k_cf)
         return scores, dict(raw_freqs)
 
-    valid_signals = {"frequency", "user_entropy", "pagerank", "target", "cf_density"}
+    valid_signals = {"frequency", "user_entropy", "pagerank", "target", "co_occurrence", "cf_density"}
     raise ValueError(
         f"Unknown collaborative signal '{signal}'. Valid signals are: {sorted(valid_signals)}"
     )
@@ -382,10 +394,10 @@ def main():
     parser.add_argument(
         "--collab-signal",
         "--popularity-signal",
-        choices=["frequency", "user_entropy", "pagerank", "target", "cf_density"],
+        choices=["frequency", "user_entropy", "pagerank", "target", "co_occurrence", "cf_density"],
         default="frequency",
         dest="collab_signal",
-        help="Collaborative signal for popularity/collaborative strategy: frequency, user_entropy, pagerank, target, cf_density (default: frequency).",
+        help="Collaborative signal for popularity/collaborative strategy: frequency, user_entropy, pagerank, target, co_occurrence, cf_density (default: frequency).",
     )
     parser.add_argument(
         "--inter-file",
