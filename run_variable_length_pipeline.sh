@@ -34,6 +34,7 @@ Options:
   --cf-emb-file PATH           Path to CF embeddings (.pt, .npy) for cf_density/composite signal
   --residuals-file PATH        Residuals JSON for residual strategy (default: <data-root>/<dataset>/<dataset>.residuals.json)
   --residual-threshold VALUE   Reconstruction error threshold for residual strategy (default: 0.2)
+  --fixed-index PATH           Intermediate fixed-length index to truncate (autodetected if omitted)
   --index-name NAME            Variable index filename (default: <dataset>.index.varlen[.<strat>][.max<k>].json)
   --overwrite-index            Replace an existing variable index
   --tokenizer-only             Stop after variable-length index generation
@@ -96,6 +97,7 @@ INTER_FILE=""
 CF_EMB_FILE=""
 RESIDUALS_FILE=""
 RESIDUAL_THRESHOLD="0.2"
+FIXED_INDEX_PARAM=""
 RESULTS_FILE=""
 INDEX_NAME=""
 MODELS="tiger"
@@ -129,6 +131,7 @@ while [[ $# -gt 0 ]]; do
     --cf-emb-file) CF_EMB_FILE="$2"; shift 2 ;;
     --residuals-file) RESIDUALS_FILE="$2"; shift 2 ;;
     --residual-threshold) RESIDUAL_THRESHOLD="$2"; shift 2 ;;
+    --fixed-index) FIXED_INDEX_PARAM="$2"; shift 2 ;;
     --index-name) INDEX_NAME="$2"; shift 2 ;;
     --models) MODELS="$2"; shift 2 ;;
     --base-model) BASE_MODEL="$2"; shift 2 ;;
@@ -260,19 +263,83 @@ fi
 INDEX_FILE="$DATA_ROOT/$DATASET/$INDEX_NAME"
 INDEX_SUFFIX="${INDEX_NAME#"$DATASET"}"
 
-if [[ "$NUM_LAYERS" -eq 4 ]]; then
-  FIXED_INDEX_NAME="$DATASET.index.fixed-for-varlen.json"
+REGEN_FIXED_INDEX=false
+if [[ -n "$FIXED_INDEX_PARAM" ]]; then
+  if [[ "$FIXED_INDEX_PARAM" != /* ]]; then
+    if [[ -f "$CALLER_DIR/$FIXED_INDEX_PARAM" ]]; then
+      FIXED_INDEX_PARAM="$CALLER_DIR/$FIXED_INDEX_PARAM"
+    elif [[ -f "$DATA_ROOT/$DATASET/$FIXED_INDEX_PARAM" ]]; then
+      FIXED_INDEX_PARAM="$DATA_ROOT/$DATASET/$FIXED_INDEX_PARAM"
+    else
+      FIXED_INDEX_PARAM="$CALLER_DIR/$FIXED_INDEX_PARAM"
+    fi
+  fi
+  FIXED_INDEX_FILE="$FIXED_INDEX_PARAM"
+  FIXED_INDEX_NAME="$(basename "$FIXED_INDEX_PARAM")"
+  if [[ ! -f "$FIXED_INDEX_FILE" ]]; then
+    printf 'Specified --fixed-index not found: %s\n' "$FIXED_INDEX_FILE" >&2
+    exit 1
+  fi
 else
-  FIXED_INDEX_NAME="$DATASET.index.fixed-for-varlen.L${NUM_LAYERS}.json"
+  if [[ "$NUM_LAYERS" -eq 4 ]]; then
+    FIXED_INDEX_NAME="$DATASET.index.fixed-for-varlen.json"
+    FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/$FIXED_INDEX_NAME"
+    if [[ ! -f "$FIXED_INDEX_FILE" ]]; then
+      if [[ -f "$DATA_ROOT/$DATASET/$DATASET.index.fixed.json" ]]; then
+        FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/$DATASET.index.fixed.json"
+        FIXED_INDEX_NAME="$DATASET.index.fixed.json"
+      elif [[ -f "$DATA_ROOT/$DATASET/$DATASET.index.json" ]]; then
+        FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/$DATASET.index.json"
+        FIXED_INDEX_NAME="$DATASET.index.json"
+      fi
+    fi
+  else
+    FIXED_INDEX_NAME="$DATASET.index.fixed-for-varlen.L${NUM_LAYERS}.json"
+    FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/$FIXED_INDEX_NAME"
+    if [[ ! -f "$FIXED_INDEX_FILE" ]]; then
+      if [[ -f "$DATA_ROOT/$DATASET/$DATASET.index.fixed.L${NUM_LAYERS}.json" ]]; then
+        FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/$DATASET.index.fixed.L${NUM_LAYERS}.json"
+        FIXED_INDEX_NAME="$DATASET.index.fixed.L${NUM_LAYERS}.json"
+      fi
+    fi
+  fi
 fi
-FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/$FIXED_INDEX_NAME"
-if [[ ! -f "$FIXED_INDEX_FILE" ]]; then
-  if [[ "$NUM_LAYERS" -eq 4 && -f "$DATA_ROOT/$DATASET/$DATASET.index.json" ]]; then
-    FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/$DATASET.index.json"
-    FIXED_INDEX_NAME="$DATASET.index.json"
-  elif [[ -f "$DATA_ROOT/$DATASET/$DATASET.index.fixed.json" ]]; then
-    FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/$DATASET.index.fixed.json"
-    FIXED_INDEX_NAME="$DATASET.index.fixed.json"
+
+if [[ -f "$FIXED_INDEX_FILE" ]]; then
+  CHECK_INDEX_TOKENS=$("$PYTHON_BIN" -c '
+import sys, json
+try:
+    with open(sys.argv[1]) as f:
+        data = json.load(f)
+    if not data:
+        print("0")
+        sys.exit(0)
+    first_val = next(iter(data.values()))
+    if isinstance(first_val, list):
+        print(len(first_val))
+    else:
+        print("0")
+except Exception:
+    print("-1")
+' "$FIXED_INDEX_FILE" 2>/dev/null || echo "-1")
+
+  if [[ "$CHECK_INDEX_TOKENS" -ge 0 && "$CHECK_INDEX_TOKENS" -lt "$MAX_LENGTH" ]]; then
+    if [[ -n "$FIXED_INDEX_PARAM" ]]; then
+      printf 'Specified --fixed-index (%s) has %s tokens per item, fewer than --max-length (%s).\n' \
+        "$FIXED_INDEX_FILE" "$CHECK_INDEX_TOKENS" "$MAX_LENGTH" >&2
+      exit 1
+    else
+      printf '\n[Fixed index] Warning: Autodetected %s has %s tokens per item, fewer than --max-length (%s).\n' \
+        "$FIXED_INDEX_FILE" "$CHECK_INDEX_TOKENS" "$MAX_LENGTH"
+      printf '[Fixed index] Will generate an intermediate fixed index with %s layers.\n' "$NUM_LAYERS"
+      if [[ "$NUM_LAYERS" -eq 4 ]]; then
+        FIXED_INDEX_NAME="$DATASET.index.fixed-for-varlen.json"
+      else
+        FIXED_INDEX_NAME="$DATASET.index.fixed-for-varlen.L${NUM_LAYERS}.json"
+      fi
+      FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/$FIXED_INDEX_NAME"
+      REGEN_FIXED_INDEX=true
+    fi
   fi
 fi
 
@@ -434,7 +501,7 @@ else
     --tokenizer-only
     --python "$PYTHON_BIN"
   )
-  if [[ "$OVERWRITE_INDEX" == true ]]; then
+  if [[ "$OVERWRITE_INDEX" == true || "$REGEN_FIXED_INDEX" == true ]]; then
     fixed_args+=(--overwrite-index)
   fi
   if [[ "$RETRAIN_RQVAE" == true ]]; then
@@ -450,7 +517,7 @@ else
     fixed_args+=(--rqvae-checkpoint "$RQ_CHECKPOINT")
   fi
 
-  if [[ -f "$FIXED_INDEX_FILE" && "$OVERWRITE_INDEX" != true && "$RETRAIN_RQVAE" != true ]]; then
+  if [[ -f "$FIXED_INDEX_FILE" && "$OVERWRITE_INDEX" != true && "$RETRAIN_RQVAE" != true && "$REGEN_FIXED_INDEX" != true ]]; then
     printf '\n[Fixed index] Found existing intermediate index: %s\n' "$FIXED_INDEX_FILE"
     printf '[Fixed index] Reusing existing fixed index (pass --overwrite-index to regenerate).\n'
   else

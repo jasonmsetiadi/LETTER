@@ -219,6 +219,11 @@ for L in "${LENGTHS[@]}"; do
         --beta "$BETA"
         --python "$PYTHON_BIN"
       )
+      if [[ "$L" -eq 4 && -f "$DATA_ROOT/$DATASET/$DATASET.index.fixed.json" && "$OVERWRITE_INDEX" != true ]]; then
+        varlen_cmd+=(--fixed-index "$DATA_ROOT/$DATASET/$DATASET.index.fixed.json")
+      elif [[ "$L" -ne 4 && -f "$DATA_ROOT/$DATASET/$DATASET.index.fixed.L${L}.json" && "$OVERWRITE_INDEX" != true ]]; then
+        varlen_cmd+=(--fixed-index "$DATA_ROOT/$DATASET/$DATASET.index.fixed.L${L}.json")
+      fi
       if [[ -n "$TIGER_GPUS" ]]; then varlen_cmd+=(--tiger-gpus "$TIGER_GPUS"); fi
       if [[ -n "$LCREC_GPUS" ]]; then varlen_cmd+=(--lcrec-gpus "$LCREC_GPUS"); fi
       if [[ "$RETRAIN_RQVAE" == true ]]; then varlen_cmd+=(--retrain-rqvae); fi
@@ -242,7 +247,8 @@ data_root = sys.argv[3]
 lengths_input = sys.argv[4].split()
 models_input = [m.strip() for m in sys.argv[5].split(",") if m.strip()]
 
-tested_lengths = sorted(list(set([int(x) for x in lengths_input] + ([4] if os.path.exists(os.path.join(repo_root, "LETTER-TIGER/results", dataset, "fixed.json")) else []))))
+has_fixed_4 = any(os.path.exists(os.path.join(repo_root, "LETTER-TIGER" if m == "tiger" else "LETTER-LC-Rec", "results", dataset, "fixed.json")) for m in models_input)
+tested_lengths = sorted(list(set([int(x) for x in lengths_input] + ([4] if has_fixed_4 else []))))
 
 row_fmt = "| {:<8} | {:<8} | {:<6} | {:<7} | {:<8} | {:<8} | {:<8} | {:<8} | {:<8} |"
 sep = "+----------+----------+--------+---------+----------+----------+----------+----------+----------+"
