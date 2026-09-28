@@ -2,19 +2,11 @@ import argparse
 import json
 import os
 import sys
-from collections import Counter
 from pathlib import Path
 
 # Add RQ-VAE directory to sys.path for local module resolution
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-try:
-    from truncate_indices import (
-        truncate_indices,
-        compute_interaction_signals,
-    )
-except ImportError:
-    truncate_indices = None
-    compute_interaction_signals = None
+from compare_semantic_ids import evaluate_semantic_ids
 
 
 def parse_args():
@@ -136,11 +128,18 @@ def main():
         report_json = os.path.join(report_dir, "strategy_comparison.json")
 
         existing_entries = {}
+        existing_sid_entries = {}
+        existing_pairwise_match = {}
+        existing_pairwise_mae = {}
         if not args.no_merge and os.path.isfile(report_json):
             try:
-                with open(report_json) as f:
+                with open(report_json, encoding="utf-8") as f:
                     prev_raw = json.load(f)
-                prev_list = prev_raw.get("strategy_comparison", prev_raw) if isinstance(prev_raw, dict) else prev_raw
+                prev_list = (
+                    prev_raw.get("strategy_comparison", prev_raw.get("recommendation_metrics", prev_raw))
+                    if isinstance(prev_raw, dict)
+                    else prev_raw
+                )
                 if isinstance(prev_list, list):
                     for item in prev_list:
                         if isinstance(item, dict) and "strategy" in item:
@@ -148,6 +147,15 @@ def main():
                             if s_name == "popularity":
                                 s_name = "popularity:frequency"
                             existing_entries[s_name] = item
+
+                if isinstance(prev_raw, dict):
+                    sid_list = prev_raw.get("semantic_id_metrics", prev_raw.get("semantic_id_evaluation", []))
+                    if isinstance(sid_list, list):
+                        for item in sid_list:
+                            if isinstance(item, dict) and "strategy" in item:
+                                existing_sid_entries[item["strategy"]] = item
+                    existing_pairwise_match = prev_raw.get("pairwise_exact_match_pct", {})
+                    existing_pairwise_mae = prev_raw.get("pairwise_mae_tokens", {})
             except Exception:
                 pass
 
@@ -158,8 +166,7 @@ def main():
                 if s and s not in discovered_strategies:
                     discovered_strategies.append(s)
 
-        # Build comprehensive list of strategies:
-        # 1) Start with user-requested strategies (normalizing 'popularity' -> 'popularity:frequency' if collab signals used)
+        # Build comprehensive list of strategies
         has_collab_expanded = any(
             k.startswith("popularity:") and k != "popularity:frequency"
             for k in list(existing_entries.keys()) + discovered_strategies
@@ -170,12 +177,10 @@ def main():
             if norm_s not in combined_strategies:
                 combined_strategies.append(norm_s)
 
-        # 2) Include discovered result files
         for s in discovered_strategies:
             if s not in combined_strategies:
                 combined_strategies.append(s)
 
-        # 3) Include previous report entries
         for s in existing_entries:
             if s not in combined_strategies:
                 combined_strategies.append(s)
@@ -183,45 +188,37 @@ def main():
         # Sort canonically
         combined_strategies.sort(key=strategy_sort_key)
 
-        table_data = []
-        strategy_lengths = {}
-        base_idx_file = os.path.join(data_root, dataset, f"{dataset}.index.json")
-        if not os.path.isfile(base_idx_file):
-            base_idx_file = os.path.join(data_root, dataset, f"{dataset}.index.fixed.json")
+        # --- Evaluate Semantic IDs via compare_semantic_ids ---
+        sid_eval = {}
+        try:
+            sid_eval = evaluate_semantic_ids(
+                dataset=dataset,
+                repo_root=repo_root,
+                data_root=data_root,
+                min_length=min_length,
+                max_length=max_length,
+                strategies=combined_strategies,
+                pairwise=not args.no_pairwise_sid,
+                existing_sid_entries=existing_sid_entries,
+            )
+        except Exception as e:
+            print(f"[Warning] Semantic ID evaluation failed: {e}", file=sys.stderr)
 
-        base_indices = None
-        if os.path.isfile(base_idx_file):
-            try:
-                with open(base_idx_file, encoding="utf-8") as bf:
-                    base_indices = json.load(bf)
-            except Exception:
-                pass
+        sid_results_map = {r["strategy"]: r for r in sid_eval.get("results", [])}
+        items_count = sid_eval.get("items_count", None)
+        total_traffic = sid_eval.get("total_traffic", None)
 
-        inter_file = os.path.join(data_root, dataset, f"{dataset}.inter.json")
-        residuals_file = os.path.join(data_root, dataset, f"{dataset}.residuals.json")
+        # Recommendation and Semantic ID tables
+        recom_table_data = []
+        sid_table_data = []
 
         for strat in combined_strategies:
-            idx_summary_file = None
             res_file = None
-            file_tag = "pop"
-
             if strat == "fixed":
-                idx_summary_file = os.path.join(
-                    data_root, dataset, f"{dataset}.index.fixed-for-varlen.summary.json"
-                )
-                if not os.path.isfile(idx_summary_file):
-                    idx_summary_file = os.path.join(
-                        data_root, dataset, f"{dataset}.index.fixed.summary.json"
-                    )
                 res_fname = "fixed.json" if max_length == 4 else f"fixed_L{max_length}.json"
                 res_file = os.path.join(repo_root, model_dir, "results", dataset, res_fname)
-
             elif strat == "shortest_unique":
-                idx_summary_file = os.path.join(
-                    data_root, dataset, f"{dataset}.index.varlen{tag}.summary.json"
-                )
                 res_file = os.path.join(repo_root, model_dir, "results", dataset, f"varlen{tag}.json")
-
             elif (
                 strat == "popularity"
                 or strat.startswith("popularity:")
@@ -247,212 +244,136 @@ def main():
                     "composite": ("pop-composite", "-pop-composite"),
                     "cf_density": ("pop-cf", "-pop-cf"),
                 }
-                file_tag, res_tag = sig_map.get(sig, (f"pop-{sig}", f"-pop-{sig}"))
-                idx_summary_file = os.path.join(
-                    data_root, dataset, f"{dataset}.index.varlen.{file_tag}{tag}.summary.json"
-                )
-                if not os.path.isfile(idx_summary_file):
-                    idx_summary_file = os.path.join(
-                        data_root, dataset, f"{dataset}.index.varlen.{file_tag}.summary.json"
-                    )
+                _, res_tag = sig_map.get(sig, (f"pop-{sig}", f"-pop-{sig}"))
                 full_res_tag = res_tag if not tag else f"{res_tag}{tag}"
                 res_file = os.path.join(
                     repo_root, model_dir, "results", dataset, f"varlen{full_res_tag}.json"
                 )
-
             elif strat == "residual":
-                idx_summary_file = os.path.join(
-                    data_root, dataset, f"{dataset}.index.varlen.res{tag}.summary.json"
-                )
                 res_tag = "-res" if not tag else f"-res{tag}"
                 res_file = os.path.join(
                     repo_root, model_dir, "results", dataset, f"varlen{res_tag}.json"
                 )
 
-            mean_l = float(max_length) if strat == "fixed" else None
-            w_mean_l = float(max_length) if strat == "fixed" else None
-            collisions = 0
-
-            # 1) Try reading from summary JSON file
-            if idx_summary_file and os.path.isfile(idx_summary_file):
-                try:
-                    with open(idx_summary_file) as f:
-                        sdata = json.load(f)
-                    mean_l = sdata.get("mean_length", mean_l)
-                    w_mean_l = sdata.get("weighted_mean_length", w_mean_l)
-                    collisions = sdata.get("collisions", 0)
-                except Exception:
-                    pass
-            elif strat != "fixed":
-                # Fallback: inspect actual index file directly
-                if strat == "shortest_unique":
-                    actual_idx_name = f"{dataset}.index.varlen{tag}.json"
-                elif strat == "residual":
-                    actual_idx_name = f"{dataset}.index.varlen.res{tag}.json"
-                else:
-                    actual_idx_name = f"{dataset}.index.varlen.{file_tag}{tag}.json"
-                actual_idx_file = os.path.join(data_root, dataset, actual_idx_name)
-                if os.path.isfile(actual_idx_file):
-                    try:
-                        with open(actual_idx_file) as f:
-                            idata = json.load(f)
-                        lens = [len(v) for v in idata.values()]
-                        mean_l = sum(lens) / max(1, len(lens))
-                        uniq = len({tuple(v) for v in idata.values()})
-                        collisions = len(idata) - uniq
-                        strategy_lengths[strat] = {str(k): len(v) for k, v in idata.items()}
-                    except Exception:
-                        pass
-
-            # Resolve item lengths for pairwise analysis
-            if strat == "fixed" and base_indices:
-                strategy_lengths["fixed"] = {str(k): max_length for k in base_indices}
-            elif strat != "fixed" and strat not in strategy_lengths and base_indices and truncate_indices:
-                # Derive lengths dynamically using truncate_indices if index JSON wasn't on disk
-                if strat == "shortest_unique":
-                    try:
-                        _, lmap = truncate_indices(base_indices, min_length=min_length, max_length=max_length, strategy="shortest_unique")
-                        strategy_lengths["shortest_unique"] = {str(k): v for k, v in lmap.items()}
-                    except Exception:
-                        pass
-                elif strat.startswith("popularity") or strat.startswith("collaborative") or strat.startswith("pop-"):
-                    if ":" in strat:
-                        sig_name = strat.split(":", 1)[1]
-                    elif strat.startswith("pop-"):
-                        sig_name = strat[4:]
-                    else:
-                        sig_name = "frequency"
-                    alias = {"entropy": "user_entropy", "pr": "pagerank", "cf": "cf_density"}
-                    sig_name = alias.get(sig_name, sig_name)
-                    if os.path.isfile(inter_file) and compute_interaction_signals:
-                        try:
-                            scores, freqs = compute_interaction_signals(inter_file, signal=sig_name)
-                            _, lmap = truncate_indices(base_indices, min_length=min_length, max_length=max_length, strategy="popularity", item_scores=scores, item_frequencies=freqs)
-                            strategy_lengths[strat] = {str(k): v for k, v in lmap.items()}
-                        except Exception:
-                            pass
-                elif strat == "residual":
-                    if os.path.isfile(residuals_file):
-                        try:
-                            with open(residuals_file) as rf:
-                                rdata = json.load(rf)
-                            _, lmap = truncate_indices(base_indices, min_length=min_length, max_length=max_length, strategy="residual", residuals=rdata, residual_threshold=0.2)
-                            strategy_lengths["residual"] = {str(k): v for k, v in lmap.items()}
-                        except Exception:
-                            pass
-
-                if mean_l is None and strat in strategy_lengths:
-                    lens = list(strategy_lengths[strat].values())
-                    if lens:
-                        mean_l = sum(lens) / len(lens)
-
-            # 2) Fallback for weighted mean length
-            if w_mean_l is None and strat != "fixed":
-                if strat in strategy_lengths and os.path.isfile(inter_file):
-                    try:
-                        with open(inter_file) as int_f:
-                            idata = json.load(int_f)
-                        freqs = Counter()
-                        for v in idata.values():
-                            if isinstance(v, list):
-                                freqs.update(str(x) for x in v)
-                            elif isinstance(v, (int, float)):
-                                freqs[str(v)] += 1
-                        tot_f = sum(freqs.get(str(i), 0) for i in strategy_lengths[strat])
-                        if tot_f > 0:
-                            w_mean_l = sum(
-                                l * freqs.get(str(i), 0) for i, l in strategy_lengths[strat].items()
-                            ) / tot_f
-                    except Exception:
-                        pass
-                else:
-                    if strat == "shortest_unique":
-                        actual_idx_name = f"{dataset}.index.varlen{tag}.json"
-                    elif strat == "residual":
-                        actual_idx_name = f"{dataset}.index.varlen.res{tag}.json"
-                    else:
-                        actual_idx_name = f"{dataset}.index.varlen.{file_tag}{tag}.json"
-                    idx_path = os.path.join(data_root, dataset, actual_idx_name)
-                    inter_path = os.path.join(data_root, dataset, f"{dataset}.inter.json")
-                    if os.path.isfile(idx_path) and os.path.isfile(inter_path):
-                        try:
-                            with open(inter_path) as int_f:
-                                idata = json.load(int_f)
-                            freqs = Counter()
-                            for v in idata.values():
-                                if isinstance(v, list):
-                                    freqs.update(str(x) for x in v)
-                                elif isinstance(v, (int, float)):
-                                    freqs[str(v)] += 1
-                            with open(idx_path) as ifile:
-                                idx_data = json.load(ifile)
-                            tot_f = sum(freqs.get(str(i), 0) for i in idx_data)
-                            if tot_f > 0:
-                                w_mean_l = sum(
-                                    len(toks) * freqs.get(str(i), 0) for i, toks in idx_data.items()
-                                ) / tot_f
-                        except Exception:
-                            pass
-
+            # Recommendation metrics
             metrics = {}
             status = "pending"
             if res_file and os.path.isfile(res_file):
                 try:
-                    with open(res_file) as f:
+                    with open(res_file, encoding="utf-8") as f:
                         rdata = json.load(f)
                     metrics = rdata.get("mean_results", {})
                     status = "completed"
                 except Exception:
                     status = "error"
 
-            # 3) Fallback / merge from existing entries in strategy_comparison.json
             if strat in existing_entries:
                 prev_row = existing_entries[strat]
                 if status != "completed" and prev_row.get("status") == "completed":
                     metrics = prev_row.get("metrics", {})
                     status = "completed"
-                if mean_l is None and prev_row.get("mean_length") is not None:
-                    mean_l = prev_row["mean_length"]
-                if w_mean_l is None and prev_row.get("weighted_length") is not None:
-                    w_mean_l = prev_row["weighted_length"]
-                if collisions == 0 and prev_row.get("collisions", 0) > 0:
-                    collisions = prev_row["collisions"]
 
-            table_data.append({
+            # Semantic ID evaluation metrics
+            sid_metric = sid_results_map.get(strat) or existing_sid_entries.get(strat, {})
+            mean_l = sid_metric.get("mean_length")
+            w_mean_l = sid_metric.get("traffic_weighted_length") or sid_metric.get("weighted_length")
+            token_savings = sid_metric.get("token_savings_pct")
+            collisions = sid_metric.get("collisions", 0)
+            length_dist = sid_metric.get("length_distribution", {})
+            rho = sid_metric.get("spearman_rho_vs_frequency")
+            label = sid_metric.get("label", strat)
+            basis = sid_metric.get("basis", "")
+
+            # Fallbacks from existing entries if needed
+            if mean_l is None and strat in existing_entries:
+                mean_l = existing_entries[strat].get("mean_length")
+            if w_mean_l is None and strat in existing_entries:
+                w_mean_l = existing_entries[strat].get("weighted_length")
+            if collisions == 0 and strat in existing_entries:
+                collisions = existing_entries[strat].get("collisions", 0)
+            if token_savings is None and mean_l is not None and max_length > 0:
+                ref_len = w_mean_l if w_mean_l is not None else mean_l
+                token_savings = (1.0 - ref_len / max_length) * 100.0
+
+            recom_table_data.append({
                 "strategy": strat,
                 "mean_length": mean_l,
                 "weighted_length": w_mean_l,
+                "token_savings_pct": token_savings,
                 "collisions": collisions,
                 "metrics": metrics,
                 "status": status,
             })
 
-        # Locate fixed baseline metrics if present
+            sid_table_data.append({
+                "strategy": strat,
+                "label": label,
+                "basis": basis,
+                "mean_length": mean_l,
+                "traffic_weighted_length": w_mean_l,
+                "token_savings_pct": token_savings,
+                "length_distribution": length_dist,
+                "collisions": collisions,
+                "spearman_rho_vs_frequency": rho,
+            })
+
+        # Pairwise matrices merging
+        pairwise_match = sid_eval.get("pairwise_exact_match_pct", {})
+        pairwise_mae = sid_eval.get("pairwise_mae_tokens", {})
+        if existing_pairwise_match:
+            for s1, m_dict in existing_pairwise_match.items():
+                if s1 not in pairwise_match:
+                    pairwise_match[s1] = dict(m_dict)
+                else:
+                    for s2, val in m_dict.items():
+                        pairwise_match[s1].setdefault(s2, val)
+        if existing_pairwise_mae:
+            for s1, m_dict in existing_pairwise_mae.items():
+                if s1 not in pairwise_mae:
+                    pairwise_mae[s1] = dict(m_dict)
+                else:
+                    for s2, val in m_dict.items():
+                        pairwise_mae[s1].setdefault(s2, val)
+
+        # Locate fixed baseline metrics
         fixed_metrics = None
-        for row in table_data:
+        for row in recom_table_data:
             if row["strategy"] == "fixed" and row["status"] == "completed":
                 fixed_metrics = row["metrics"]
                 break
 
-        # Dynamically size the strategy column for alignment
-        max_s_len = max([len(r["strategy"]) for r in table_data] + [len("Strategy")])
-        strat_col_w = max(22, max_s_len)
-        row_fmt = f"| {{:<{strat_col_w}}} | {{:<8}} | {{:<10}} | {{:<6}} | {{:<8}} | {{:<8}} | {{:<8}} | {{:<8}} | {{:<8}} |"
-        sep = f"+{'-' * (strat_col_w + 2)}+----------+------------+--------+----------+----------+----------+----------+----------+"
-        header = row_fmt.format(
+        # -------------------------------------------------------------
+        # 1. TEXT FORMATTING
+        # -------------------------------------------------------------
+        max_s_len = max([len(r["strategy"]) for r in recom_table_data] + [len("Strategy")])
+        strat_col_w = max(24, max_s_len + 2)
+
+        # Section 1: Recommendation Performance Table
+        rec_fmt = f"| {{:<{strat_col_w}}} | {{:<8}} | {{:<10}} | {{:<6}} | {{:<8}} | {{:<8}} | {{:<8}} | {{:<8}} | {{:<8}} |"
+        rec_sep = f"+{'-' * (strat_col_w + 2)}+----------+------------+--------+----------+----------+----------+----------+----------+"
+        rec_header = rec_fmt.format(
             "Strategy", "Mean L", "W-Mean L", "Coll.", "Hit@1", "Hit@5", "Hit@10", "NDCG@5", "NDCG@10"
         )
-        table_width = len(sep)
+        total_rec_width = len(rec_sep)
 
-        lines = [
-            "\n" + "=" * table_width,
-            f" STRATEGY COMPARISON EXPERIMENT: {model_name} ({dataset})",
-            "=" * table_width,
-            header,
-            sep,
+        header_lines = [
+            "\n" + "=" * total_rec_width,
+            f" LETTER STRATEGY COMPARISON & SEMANTIC ID EVALUATION: {model_name} ({dataset})",
         ]
+        if items_count and total_traffic:
+            header_lines.append(
+                f" Catalog Items: {items_count:,} | Total Interactions: {total_traffic:,} | Token Depth: [{min_length}, {max_length}]"
+            )
+        header_lines.extend([
+            "=" * total_rec_width,
+            "\n 1. Recommendation Performance",
+            rec_sep,
+            rec_header,
+            rec_sep,
+        ])
 
-        for row in table_data:
+        rec_lines = list(header_lines)
+        for row in recom_table_data:
             strat = row["strategy"]
             ml_val = row["mean_length"]
             wml_val = row["weighted_length"]
@@ -467,9 +388,8 @@ def main():
                 h10 = f"{m.get('hit@10', 0)*100:.2f}%"
                 n5 = f"{m.get('ndcg@5', 0)*100:.2f}%"
                 n10 = f"{m.get('ndcg@10', 0)*100:.2f}%"
-                lines.append(row_fmt.format(strat, ml_str, wml_str, col_str, h1, h5, h10, n5, n10))
+                rec_lines.append(rec_fmt.format(strat, ml_str, wml_str, col_str, h1, h5, h10, n5, n10))
 
-                # Add Delta row if not fixed and fixed exists
                 if strat != "fixed" and fixed_metrics:
                     def get_delta(key):
                         base = fixed_metrics.get(key, 0)
@@ -486,130 +406,145 @@ def main():
                     dh10 = get_delta("hit@10")
                     dn5 = get_delta("ndcg@5")
                     dn10 = get_delta("ndcg@10")
-                    delta_line = row_fmt.format("  (delta vs fix)", d_ml, d_wml, "", dh1, dh5, dh10, dn5, dn10)
-                    lines.append(delta_line)
+                    rec_lines.append(rec_fmt.format("  (delta vs fix)", d_ml, d_wml, "", dh1, dh5, dh10, dn5, dn10))
             else:
                 status_tag = f"({row['status']})"
-                lines.append(row_fmt.format(strat, ml_str, wml_str, col_str, status_tag, "-", "-", "-", "-"))
+                rec_lines.append(rec_fmt.format(strat, ml_str, wml_str, col_str, status_tag, "-", "-", "-", "-"))
+        rec_lines.append(rec_sep)
 
-        lines.append(sep)
+        # Section 2: Semantic ID Evaluation & Compression Table
+        layer_keys = list(range(1, max_length + 1))
+        layer_headers = [f"L={k}" for k in layer_keys]
+        layer_widths = [max(6, len(h)) for h in layer_headers]
+        layer_hdr_str = " | ".join(f"{h:>{w}}" for h, w in zip(layer_headers, layer_widths))
+        layer_sep_str = "+".join("-" * (w + 2) for w in layer_widths)
 
-        pairwise_match = {}
-        pairwise_mae = {}
+        sid_fmt_header = f"| {{:<{strat_col_w}}} | {{:<12}} | {{:<13}} | {{:<13}} | {layer_hdr_str} | {{:<6}} | {{:<10}} |"
+        sid_sep = f"+{'-' * (strat_col_w + 2)}+--------------+---------------+---------------+{layer_sep_str}+--------+------------+"
+        sid_header = sid_fmt_header.format(
+            "Strategy", "Catalog Mean", "Traffic W-Len", "Token Savings", "Coll.", "Spearman ρ"
+        )
+        sid_lines = [
+            "\n 2. Semantic ID Evaluation & Compression",
+            sid_sep,
+            sid_header,
+            sid_sep,
+        ]
+        for row in sid_table_data:
+            strat = row["strategy"]
+            ml_val = row["mean_length"]
+            wml_val = row["traffic_weighted_length"]
+            sav_val = row["token_savings_pct"]
+            ml_str = f"{ml_val:12.3f}" if ml_val is not None else "           -"
+            wml_str = f"{wml_val:13.3f}" if wml_val is not None else "            -"
+            sav_str = f"{sav_val:12.1f}%" if sav_val is not None else "            -"
+            d = row.get("length_distribution", {})
+            tot = items_count or (sum(d.values()) if d else 0)
+            if tot and tot > 0 and d and any(d.values()):
+                layer_vals = [
+                    f"{(d.get(k, d.get(str(k), 0)) / tot) * 100.0:.1f}%"
+                    for k in layer_keys
+                ]
+            else:
+                layer_vals = ["-" for _ in layer_keys]
+            layer_val_str = " | ".join(f"{v:>{w}}" for v, w in zip(layer_vals, layer_widths))
+            col_str = str(row["collisions"])
+            rho_val = row["spearman_rho_vs_frequency"]
+            rho_str = f"{rho_val:10.4f}" if rho_val is not None else "         -"
+            sid_lines.append(
+                f"| {strat:<{strat_col_w}} | {ml_str} | {wml_str} | {sav_str} | {layer_val_str} | {col_str:<6} | {rho_str} |"
+            )
+        sid_lines.append(sid_sep)
+
+        # Sections 3 & 4: Pairwise Tables
         pairwise_text_sections = []
-        pairwise_md_sections = []
+        valid_pairwise_strats = [s for s in combined_strategies if s in pairwise_match]
+        if not args.no_pairwise_sid and len(valid_pairwise_strats) > 1:
+            p_col_w = max(14, max(len(s) for s in valid_pairwise_strats + ["Strategy"]) + 2)
+            p_row_fmt = f"| {{:<{p_col_w}}} | " + " | ".join([f"{{:<{p_col_w}}}" for _ in valid_pairwise_strats]) + " |"
+            p_sep = f"+{'-' * (p_col_w + 2)}+" + "+".join([f"{'-' * (p_col_w + 2)}" for _ in valid_pairwise_strats]) + "+"
+            p_width = len(p_sep)
 
-        if not args.no_pairwise_sid and len(strategy_lengths) > 1:
-            valid_strats = [s for s in combined_strategies if s in strategy_lengths]
-            if len(valid_strats) > 1:
-                # Find common items across all strategies with lengths
-                common_items = sorted(
-                    set.intersection(*[set(strategy_lengths[s].keys()) for s in valid_strats]),
-                    key=lambda x: int(x) if x.isdigit() else x,
-                )
-                if common_items:
-                    n_items = len(common_items)
-                    for s1 in valid_strats:
-                        pairwise_match[s1] = {}
-                        pairwise_mae[s1] = {}
-                        l1 = strategy_lengths[s1]
-                        for s2 in valid_strats:
-                            l2 = strategy_lengths[s2]
-                            matches = sum(l1[k] == l2[k] for k in common_items)
-                            diffs = sum(abs(l1[k] - l2[k]) for k in common_items)
-                            pairwise_match[s1][s2] = round((matches / n_items) * 100.0, 2)
-                            pairwise_mae[s1][s2] = round(diffs / n_items, 3)
+            pairwise_text_sections.extend([
+                "\n" + "=" * p_width,
+                " 3. Pairwise Exact Semantic ID Agreement Rate (%)",
+                " (Percentage of items in catalog assigned identical Semantic IDs between strategies)",
+                "=" * p_width,
+                p_row_fmt.format("Strategy", *valid_pairwise_strats),
+                p_sep,
+            ])
+            for s1 in valid_pairwise_strats:
+                row_vals = [
+                    f"{pairwise_match.get(s1, {}).get(s2, 0.0):.2f}%" if s2 in pairwise_match.get(s1, {}) else "-"
+                    for s2 in valid_pairwise_strats
+                ]
+                pairwise_text_sections.append(p_row_fmt.format(s1, *row_vals))
+            pairwise_text_sections.append(p_sep)
 
-                    # Text Formatting
-                    max_name_w = max(len(s) for s in valid_strats + ["Strategy"])
-                    col_w = max(14, max_name_w + 2)
-                    p_row_fmt = f"| {{:<{col_w}}} | " + " | ".join([f"{{:<{col_w}}}" for _ in valid_strats]) + " |"
-                    p_sep = f"+{'-' * (col_w + 2)}+" + "+".join([f"{'-' * (col_w + 2)}" for _ in valid_strats]) + "+"
-                    p_width = len(p_sep)
+            pairwise_text_sections.extend([
+                "\n" + "=" * p_width,
+                " 4. Pairwise Mean Absolute Length Difference (Tokens)",
+                " (Average token length divergence per item: sum(|L_A - L_B|) / N)",
+                "=" * p_width,
+                p_row_fmt.format("Strategy", *valid_pairwise_strats),
+                p_sep,
+            ])
+            for s1 in valid_pairwise_strats:
+                row_vals = [
+                    f"{pairwise_mae.get(s1, {}).get(s2, 0.0):.3f}" if s2 in pairwise_mae.get(s1, {}) else "-"
+                    for s2 in valid_pairwise_strats
+                ]
+                pairwise_text_sections.append(p_row_fmt.format(s1, *row_vals))
+            pairwise_text_sections.append(p_sep)
 
-                    pairwise_text_sections.extend([
-                        "\n" + "=" * p_width,
-                        " Pairwise Exact Semantic ID Agreement Rate (%)",
-                        " (Percentage of items in catalog assigned identical Semantic IDs between strategies)",
-                        "=" * p_width,
-                        p_row_fmt.format("Strategy", *valid_strats),
-                        p_sep,
-                    ])
-                    for s1 in valid_strats:
-                        row_vals = [f"{pairwise_match[s1][s2]:.2f}%" for s2 in valid_strats]
-                        pairwise_text_sections.append(p_row_fmt.format(s1, *row_vals))
-                    pairwise_text_sections.append(p_sep)
-
-                    pairwise_text_sections.extend([
-                        "\n" + "=" * p_width,
-                        " Pairwise Mean Absolute Length Difference (Tokens)",
-                        " (Average token length divergence per item: sum(|L_A - L_B|) / N)",
-                        "=" * p_width,
-                        p_row_fmt.format("Strategy", *valid_strats),
-                        p_sep,
-                    ])
-                    for s1 in valid_strats:
-                        row_vals = [f"{pairwise_mae[s1][s2]:.3f}" for s2 in valid_strats]
-                        pairwise_text_sections.append(p_row_fmt.format(s1, *row_vals))
-                    pairwise_text_sections.append(p_sep)
-
-                    # Markdown Formatting
-                    md_header = "| Strategy | " + " | ".join([f"{s}" for s in valid_strats]) + " |"
-                    md_sep = "| :--- | " + " | ".join([":---:" for _ in valid_strats]) + " |"
-
-                    pairwise_md_sections.extend([
-                        "",
-                        "### Pairwise Exact Semantic ID Agreement Rate (%)",
-                        "",
-                        "> Percentage of items in catalog that receive an identical Semantic ID across strategies.",
-                        "",
-                        md_header,
-                        md_sep,
-                    ])
-                    for s1 in valid_strats:
-                        row_vals = [f"{pairwise_match[s1][s2]:.2f}%" for s2 in valid_strats]
-                        pairwise_md_sections.append(f"| **{s1}** | " + " | ".join(row_vals) + " |")
-
-                    pairwise_md_sections.extend([
-                        "",
-                        "### Pairwise Mean Absolute Length Difference (Tokens)",
-                        "",
-                        "> Average token length divergence per item (|L_A - L_B|). Lower value indicates closer length profiles.",
-                        "",
-                        md_header,
-                        md_sep,
-                    ])
-                    for s1 in valid_strats:
-                        row_vals = [f"{pairwise_mae[s1][s2]:.3f}" for s2 in valid_strats]
-                        pairwise_md_sections.append(f"| **{s1}** | " + " | ".join(row_vals) + " |")
-
-        if pairwise_text_sections:
-            lines.extend(pairwise_text_sections)
-
-        summary_text = "\n".join(lines)
+        full_text_lines = rec_lines + sid_lines + pairwise_text_sections
+        summary_text = "\n".join(full_text_lines)
         print(summary_text)
 
-        # Save reports
+        # Save Text report
         report_txt = os.path.join(report_dir, "strategy_comparison.txt")
-        with open(report_txt, "w") as f:
+        with open(report_txt, "w", encoding="utf-8") as f:
             f.write(summary_text + "\n")
 
+        # Save JSON report
         report_payload = {
-            "strategy_comparison": table_data,
+            "dataset": dataset,
+            "model": model_name,
+            "catalog_items": items_count,
+            "total_traffic": total_traffic,
+            "min_length": min_length,
+            "max_length": max_length,
+            "strategy_comparison": recom_table_data,
+            "recommendation_metrics": recom_table_data,
+            "semantic_id_metrics": sid_table_data,
         }
         if pairwise_match:
             report_payload["pairwise_exact_match_pct"] = pairwise_match
             report_payload["pairwise_mae_tokens"] = pairwise_mae
-        with open(report_json, "w") as f:
+        with open(report_json, "w", encoding="utf-8") as f:
             json.dump(report_payload, f, indent=2)
 
-        # Save markdown version
+        # -------------------------------------------------------------
+        # 2. MARKDOWN FORMATTING
+        # -------------------------------------------------------------
         md_lines = [
-            f"### LETTER Strategy Comparison: {model_name} ({dataset})\n",
+            f"# LETTER Strategy Comparison Report: {model_name} ({dataset})\n",
+            f"- **Dataset**: `{dataset}`",
+            f"- **Model**: `{model_name}`",
+        ]
+        if items_count and total_traffic:
+            md_lines.extend([
+                f"- **Catalog Items**: {items_count:,}",
+                f"- **Total Interactions**: {total_traffic:,}",
+            ])
+        md_lines.extend([
+            f"- **Fixed ID Depth**: {max_length} tokens",
+            f"- **Minimum Allowable Depth**: {min_length} token\n",
+            "### 1. Recommendation Performance\n",
             "| Strategy | Mean Length | Weighted Length | Collisions | Hit@1 | Hit@5 | Hit@10 | NDCG@5 | NDCG@10 | Status |",
             "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
-        ]
-        for row in table_data:
+        ])
+        for row in recom_table_data:
             m = row["metrics"]
             ml_val = row["mean_length"]
             wml_val = row["weighted_length"]
@@ -628,14 +563,90 @@ def main():
             else:
                 md_lines.append(f"| **{strat_name}** | {ml} | {wml} | {col} | - | - | - | - | - | {st} |")
 
-        if pairwise_md_sections:
-            md_lines.extend(pairwise_md_sections)
+        md_sid_header = (
+            "| Strategy | Catalog Mean | Traffic W-Len | Token Savings | "
+            + " | ".join(layer_headers)
+            + " | Collisions | Spearman ρ |"
+        )
+        md_sid_sep = (
+            "| :--- | :---: | :---: | :---: | "
+            + " | ".join([":---:" for _ in layer_keys])
+            + " | :---: | :---: |"
+        )
+        md_lines.extend([
+            "",
+            "### 2. Semantic ID Evaluation & Compression\n",
+            md_sid_header,
+            md_sid_sep,
+        ])
+        for row in sid_table_data:
+            strat_name = row["strategy"]
+            ml_val = row["mean_length"]
+            wml_val = row["traffic_weighted_length"]
+            sav_val = row["token_savings_pct"]
+            ml = f"{ml_val:.3f}" if ml_val is not None else "-"
+            wml = f"{wml_val:.3f}" if wml_val is not None else "-"
+            sav = f"{sav_val:.1f}%" if sav_val is not None else "-"
+            d = row.get("length_distribution", {})
+            tot = items_count or (sum(d.values()) if d else 0)
+            if tot and tot > 0 and d and any(d.values()):
+                layer_vals = [
+                    f"{(d.get(k, d.get(str(k), 0)) / tot) * 100.0:.1f}%"
+                    for k in layer_keys
+                ]
+            else:
+                layer_vals = ["-" for _ in layer_keys]
+            col = str(row["collisions"])
+            rho_val = row["spearman_rho_vs_frequency"]
+            rho = f"{rho_val:.4f}" if rho_val is not None else "-"
+            md_lines.append(
+                f"| **{strat_name}** | {ml} | {wml} | {sav} | "
+                + " | ".join(layer_vals)
+                + f" | {col} | {rho} |"
+            )
 
+        if not args.no_pairwise_sid and len(valid_pairwise_strats) > 1:
+            md_header = "| Strategy | " + " | ".join([f"{s}" for s in valid_pairwise_strats]) + " |"
+            md_sep = "| :--- | " + " | ".join([":---:" for _ in valid_pairwise_strats]) + " |"
+
+            md_lines.extend([
+                "",
+                "### 3. Pairwise Exact Semantic ID Agreement Rate (%)",
+                "",
+                "> Percentage of items in catalog that receive an identical Semantic ID across strategies.",
+                "",
+                md_header,
+                md_sep,
+            ])
+            for s1 in valid_pairwise_strats:
+                row_vals = [
+                    f"{pairwise_match.get(s1, {}).get(s2, 0.0):.2f}%" if s2 in pairwise_match.get(s1, {}) else "-"
+                    for s2 in valid_pairwise_strats
+                ]
+                md_lines.append(f"| **{s1}** | " + " | ".join(row_vals) + " |")
+
+            md_lines.extend([
+                "",
+                "### 4. Pairwise Mean Absolute Length Difference (Tokens)",
+                "",
+                "> Average token length divergence per item (|L_A - L_B|). Lower value indicates closer length profiles.",
+                "",
+                md_header,
+                md_sep,
+            ])
+            for s1 in valid_pairwise_strats:
+                row_vals = [
+                    f"{pairwise_mae.get(s1, {}).get(s2, 0.0):.3f}" if s2 in pairwise_mae.get(s1, {}) else "-"
+                    for s2 in valid_pairwise_strats
+                ]
+                md_lines.append(f"| **{s1}** | " + " | ".join(row_vals) + " |")
+
+        # Save Markdown report
         report_md = os.path.join(report_dir, "strategy_comparison.md")
-        with open(report_md, "w") as f:
+        with open(report_md, "w", encoding="utf-8") as f:
             f.write("\n".join(md_lines) + "\n")
 
-        print(f"Saved text report to:     {report_txt}")
+        print(f"\nSaved text report to:     {report_txt}")
         print(f"Saved JSON report to:     {report_json}")
         print(f"Saved Markdown report to: {report_md}\n")
 
