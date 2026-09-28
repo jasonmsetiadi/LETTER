@@ -272,16 +272,6 @@ class TruncateIndicesTest(unittest.TestCase):
         # Item 1 should have the shortest length
         self.assertEqual(lengths["1"], 1)
 
-    def test_collaborative_composite_signal(self):
-        inter_data = {
-            f"user_{i}": ["0"] for i in range(10)
-        }
-        inter_data["solo"] = ["1"]
-        scores, _ = truncate_indices_module.compute_interaction_signals(
-            inter_data, signal="composite"
-        )
-        self.assertGreater(scores["0"], scores["1"])
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -146,7 +146,7 @@ Given length bounds $[L_{\min}, L_{\max}]$, we construct $K = L_{\max} - L_{\min
 
 ### Collaborative Signal Options (`--collab-signal`)
 
-While raw frequency provides an intuitive baseline, the codebase supports five additional collaborative signals extracted from user-item interactions and CF manifolds:
+While raw frequency provides an intuitive baseline, the codebase supports four additional collaborative signals extracted from user-item interactions and CF manifolds:
 
 | Signal Flag | Formal Definition | Theoretical Motivation | When to Use |
 | :--- | :--- | :--- | :--- |
@@ -155,7 +155,6 @@ While raw frequency provides an intuitive baseline, the codebase supports five a
 | `pagerank` | $\pi = (1 - d)\mathbf{v} + d P^T \pi$ | Sequential random-walk stationary centrality | Identifies structural transition hubs across user journeys. |
 | `target` | $S(i) = \sum_u \mathbb{I}(s_{u, -1} = i)$ | Next-item generation frequency | Directly optimizes tokens generated at inference time. |
 | `cf_density` | $S(i) = 1 - \frac{1}{k}\sum_{j \in \mathcal{N}_k(i)} \cos(e_i, e_j)$ | Latent behavioral manifold isolation | Protects items in crowded CF clusters from colliding. |
-| `composite` | $S(i) = \log_2(1 + f_i) \cdot (1 + H_{\text{user}}(i))$ | Joint traffic volume & audience breadth | Prevents power-user distortion while retaining traffic scaling. |
 
 ### Empirical Results on `Instruments` (Frequency Signal):
 - **Head Items (Length 2)**: 2,172 items (average frequency = **29.5 interactions**)

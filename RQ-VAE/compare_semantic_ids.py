@@ -54,11 +54,6 @@ SIGNAL_METADATA = {
         "basis": "Frequency in sequence-final target position",
         "file_tag": "pop-target",
     },
-    "composite": {
-        "label": "Composite Score",
-        "basis": "log2(1 + f_i) * (1 + H_user(i))",
-        "file_tag": "pop-composite",
-    },
     "cf_density": {
         "label": "CF Manifold Isolation",
         "basis": "1 - kNN crowd cosine density in CF space",
@@ -111,7 +106,7 @@ def parse_args():
     parser.add_argument(
         "--signals",
         type=str,
-        default="frequency,user_entropy,pagerank,target,composite,cf_density",
+        default="frequency,user_entropy,pagerank,target,cf_density",
         help="Comma-separated list of signals to compare (default: all).",
     )
     parser.add_argument("--min-length", type=int, default=1, help="Minimum SID length.")
@@ -348,7 +343,7 @@ def evaluate_semantic_ids(
         scores, _ = compute_interaction_signals(
             inter_file,
             signal=sig,
-            cf_emb_file=cf_emb_file if sig in ("cf_density", "composite") else None,
+            cf_emb_file=cf_emb_file if sig == "cf_density" else None,
         )
         truncated, lengths = truncate_indices(
             indices,
@@ -407,7 +402,8 @@ def evaluate_semantic_ids(
                     "cf": "cf_density",
                 }
                 sig = alias.get(sig, sig)
-                add_signal(sig, strat_key=strat)
+                if sig in SIGNAL_METADATA:
+                    add_signal(sig, strat_key=strat)
     else:
         if include_baselines:
             add_fixed()
@@ -415,7 +411,7 @@ def evaluate_semantic_ids(
             add_residual()
 
         if signals is None:
-            sig_list = ["frequency", "user_entropy", "pagerank", "target", "composite", "cf_density"]
+            sig_list = ["frequency", "user_entropy", "pagerank", "target", "cf_density"]
         elif isinstance(signals, str):
             sig_list = [s.strip() for s in signals.replace(" ", ",").split(",") if s.strip()]
         else:

@@ -155,8 +155,6 @@ def compute_interaction_signals(
                     Identifies global transition hubs across recommendation paths.
       - 'cf_density': Latent manifold isolation (1 - k-NN crowd density).
                       Requires cf_emb_file.
-      - 'composite': Unified collaborative score combining log-frequency,
-                     user audience entropy, and optional CF manifold isolation.
     """
     if isinstance(inter_source, (str, Path)):
         with Path(inter_source).open(encoding="utf-8") as f:
@@ -249,35 +247,7 @@ def compute_interaction_signals(
         scores = compute_cf_density_scores(cf_emb_file, top_k=top_k_cf)
         return scores, dict(raw_freqs)
 
-    if canonical_signal in ("composite", "collab_composite"):
-        entropy_scores = {}
-        if has_user_sequences:
-            for item, u_dict in user_counts.items():
-                tot = raw_freqs[item]
-                if tot <= 0:
-                    entropy_scores[item] = 0.0
-                    continue
-                h = 0.0
-                for _, cnt in u_dict.items():
-                    p = cnt / tot
-                    if p > 0:
-                        h -= p * math.log2(p)
-                entropy_scores[item] = h
-        scores = {}
-        for item, f in raw_freqs.items():
-            h = entropy_scores.get(item, 0.0)
-            scores[item] = math.log2(1.0 + f) * (1.0 + h)
-        if cf_emb_file:
-            try:
-                cf_scores = compute_cf_density_scores(cf_emb_file, top_k=top_k_cf)
-                for item in scores:
-                    if item in cf_scores:
-                        scores[item] *= (1.0 + max(0.0, cf_scores[item]))
-            except (ImportError, FileNotFoundError, Exception):
-                pass
-        return scores, dict(raw_freqs)
-
-    valid_signals = {"frequency", "user_entropy", "pagerank", "target", "cf_density", "composite"}
+    valid_signals = {"frequency", "user_entropy", "pagerank", "target", "cf_density"}
     raise ValueError(
         f"Unknown collaborative signal '{signal}'. Valid signals are: {sorted(valid_signals)}"
     )
@@ -412,10 +382,10 @@ def main():
     parser.add_argument(
         "--collab-signal",
         "--popularity-signal",
-        choices=["frequency", "user_entropy", "pagerank", "target", "composite", "cf_density"],
+        choices=["frequency", "user_entropy", "pagerank", "target", "cf_density"],
         default="frequency",
         dest="collab_signal",
-        help="Collaborative signal for popularity/collaborative strategy: frequency, user_entropy, pagerank, target, composite, cf_density (default: frequency).",
+        help="Collaborative signal for popularity/collaborative strategy: frequency, user_entropy, pagerank, target, cf_density (default: frequency).",
     )
     parser.add_argument(
         "--inter-file",
@@ -427,7 +397,7 @@ def main():
         "--cf-emb-file",
         type=str,
         default=None,
-        help="Path to precomputed CF embeddings (.pt, .npy, .json) for cf_density or composite signals.",
+        help="Path to precomputed CF embeddings (.pt, .npy, .json) for cf_density signal.",
     )
     parser.add_argument(
         "--cf-k-neighbors",

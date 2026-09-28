@@ -29,9 +29,9 @@ Options:
   --num-layers COUNT           Number of RQ-VAE codebook layers to train (default: max-length)
   --strategy NAME              Truncation strategy: shortest_unique, popularity, collaborative, residual (default: shortest_unique)
   --collab-signal SIGNAL       Collaborative signal for popularity/collaborative:
-                               frequency, user_entropy, pagerank, target, composite, cf_density (default: frequency)
+                               frequency, user_entropy, pagerank, target, cf_density (default: frequency)
   --inter-file PATH            Interaction JSON for popularity strategy (default: <data-root>/<dataset>/<dataset>.inter.json)
-  --cf-emb-file PATH           Path to CF embeddings (.pt, .npy) for cf_density/composite signal
+  --cf-emb-file PATH           Path to CF embeddings (.pt, .npy) for cf_density signal
   --residuals-file PATH        Residuals JSON for residual strategy (default: <data-root>/<dataset>/<dataset>.residuals.json)
   --residual-threshold VALUE   Reconstruction error threshold for residual strategy (default: 0.2)
   --fixed-index PATH           Intermediate fixed-length index to truncate (autodetected if omitted)
@@ -220,12 +220,8 @@ case "$STRATEGY" in
         STRAT_SUFFIX=".pop-cf"
         STRAT_TAG="-pop-cf"
         ;;
-      composite)
-        STRAT_SUFFIX=".pop-composite"
-        STRAT_TAG="-pop-composite"
-        ;;
       *)
-        printf 'Unknown collaborative signal: %s (choose frequency, user_entropy, pagerank, target, composite, cf_density)\n' "$COLLAB_SIGNAL" >&2
+        printf 'Unknown collaborative signal: %s (choose frequency, user_entropy, pagerank, target, cf_density)\n' "$COLLAB_SIGNAL" >&2
         exit 2
         ;;
     esac
