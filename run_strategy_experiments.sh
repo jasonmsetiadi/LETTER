@@ -57,6 +57,38 @@ format_duration() {
     "$((total_seconds % 60))"
 }
 
+find_latest_checkpoint() {
+  local root="$1"
+  local desired_layers="${2:-4}"
+  if [[ ! -d "$root" ]]; then
+    return 0
+  fi
+  "$PYTHON_BIN" -c '
+import sys, glob, os, torch
+root = sys.argv[1]
+desired_layers = int(sys.argv[2])
+candidates = glob.glob(os.path.join(root, "**", "best_collision_model.pth"), recursive=True)
+if not candidates:
+    candidates = glob.glob(os.path.join(root, "**", "best_loss_model.pth"), recursive=True)
+valid = []
+for c in candidates:
+    try:
+        ckpt = torch.load(c, map_location="cpu", weights_only=False)
+    except TypeError:
+        try:
+            ckpt = torch.load(c, map_location="cpu")
+        except Exception:
+            continue
+    except Exception:
+        continue
+    args = ckpt.get("args")
+    if args and hasattr(args, "num_emb_list") and len(args.num_emb_list) == desired_layers:
+        valid.append(c)
+if valid:
+    print(max(valid, key=os.path.getmtime))
+' "$root" "$desired_layers" 2>/dev/null || true
+}
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CALLER_DIR="$(pwd)"
 EXPERIMENT_START="$SECONDS"
@@ -139,7 +171,13 @@ if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
 fi
 
 INTER_FILE="${INTER_FILE:-$DATA_ROOT/$DATASET/$DATASET.inter.json}"
-RESIDUALS_FILE="${RESIDUALS_FILE:-$DATA_ROOT/$DATASET/$DATASET.residuals.json}"
+if [[ -z "$RESIDUALS_FILE" ]]; then
+  if [[ "$MAX_LENGTH" -eq 4 ]]; then
+    RESIDUALS_FILE="$DATA_ROOT/$DATASET/$DATASET.residuals.json"
+  else
+    RESIDUALS_FILE="$DATA_ROOT/$DATASET/$DATASET.residuals.L${MAX_LENGTH}.json"
+  fi
+fi
 if [[ -z "$CF_EMB_FILE" && -f "$REPO_ROOT/RQ-VAE/ckpt/$DATASET-32d-sasrec.pt" ]]; then
   CF_EMB_FILE="$REPO_ROOT/RQ-VAE/ckpt/$DATASET-32d-sasrec.pt"
 fi
@@ -291,19 +329,27 @@ if [[ "$SUMMARY_ONLY" != true ]]; then
       if [[ ! -f "$RESIDUALS_FILE" ]]; then
         if [[ "$AUTO_COMPUTE_RESIDUALS" == true ]]; then
           printf '\n[Residuals] Computing reconstruction residuals per item...\n'
-          # Find checkpoint
-          RQ_CKPT="$("$PYTHON_BIN" -c '
-import sys, glob, os
-root = sys.argv[1]
-candidates = glob.glob(os.path.join(root, "**", "best_collision_model.pth"), recursive=True)
-if not candidates:
-    candidates = glob.glob(os.path.join(root, "**", "best_loss_model.pth"), recursive=True)
-if candidates:
-    print(max(candidates, key=os.path.getmtime))
-' "$REPO_ROOT/checkpoint/$DATASET" 2>/dev/null || true)"
+          RQ_CKPT="$(find_latest_checkpoint "$REPO_ROOT/checkpoint/$DATASET" "$MAX_LENGTH")"
 
           if [[ -z "$RQ_CKPT" || ! -f "$RQ_CKPT" ]]; then
-            printf 'Error: Cannot auto-compute residuals; no RQ-VAE checkpoint found in checkpoint/%s\n' "$DATASET" >&2
+            printf '\n[Residuals] No %s-layer RQ-VAE checkpoint found. Training intermediate RQ-VAE first...\n' "$MAX_LENGTH"
+            bash "$REPO_ROOT/run_fixed_length_pipeline.sh" \
+              --dataset "$DATASET" \
+              --data-root "$DATA_ROOT" \
+              --num-layers "$MAX_LENGTH" \
+              --models tiger \
+              --tokenizer-only \
+              --rqvae-epochs "$RQ_EPOCHS" \
+              --rqvae-eval-step "$RQ_EVAL_STEP" \
+              --rqvae-device "$RQ_DEVICE" \
+              --alpha "$ALPHA" \
+              --beta "$BETA" \
+              --python "$PYTHON_BIN"
+            RQ_CKPT="$(find_latest_checkpoint "$REPO_ROOT/checkpoint/$DATASET" "$MAX_LENGTH")"
+          fi
+
+          if [[ -z "$RQ_CKPT" || ! -f "$RQ_CKPT" ]]; then
+            printf 'Error: Cannot auto-compute residuals; no %s-layer RQ-VAE checkpoint found in checkpoint/%s\n' "$MAX_LENGTH" "$DATASET" >&2
             exit 1
           fi
 

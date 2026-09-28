@@ -284,11 +284,12 @@ def evaluate_semantic_ids(
         })
 
     def add_residual():
-        res_file_cand = (
-            Path(residuals_file)
-            if residuals_file
-            else dataset_dir / f"{dataset}.residuals.json"
-        )
+        if residuals_file:
+            res_file_cand = Path(residuals_file)
+        elif max_length != 4 and (dataset_dir / f"{dataset}.residuals.L{max_length}.json").exists():
+            res_file_cand = dataset_dir / f"{dataset}.residuals.L{max_length}.json"
+        else:
+            res_file_cand = dataset_dir / f"{dataset}.residuals.json"
         if res_file_cand.exists():
             with res_file_cand.open(encoding="utf-8") as rf:
                 loaded_residuals = json.load(rf)

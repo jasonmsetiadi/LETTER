@@ -237,7 +237,17 @@ case "$STRATEGY" in
   residual)
     STRAT_SUFFIX=".res"
     STRAT_TAG="-res"
-    RESIDUALS_FILE="${RESIDUALS_FILE:-$DATA_ROOT/$DATASET/$DATASET.residuals.json}"
+    if [[ -z "$RESIDUALS_FILE" ]]; then
+      if [[ "$NUM_LAYERS" -ne 4 && -f "$DATA_ROOT/$DATASET/$DATASET.residuals.L${NUM_LAYERS}.json" ]]; then
+        RESIDUALS_FILE="$DATA_ROOT/$DATASET/$DATASET.residuals.L${NUM_LAYERS}.json"
+      elif [[ "$MAX_LENGTH" -ne 4 && -f "$DATA_ROOT/$DATASET/$DATASET.residuals.L${MAX_LENGTH}.json" ]]; then
+        RESIDUALS_FILE="$DATA_ROOT/$DATASET/$DATASET.residuals.L${MAX_LENGTH}.json"
+      elif [[ "$MAX_LENGTH" -ne 4 ]]; then
+        RESIDUALS_FILE="$DATA_ROOT/$DATASET/$DATASET.residuals.L${MAX_LENGTH}.json"
+      else
+        RESIDUALS_FILE="$DATA_ROOT/$DATASET/$DATASET.residuals.json"
+      fi
+    fi
     if [[ ! -f "$RESIDUALS_FILE" ]]; then
       printf 'Residuals file not found for residual strategy: %s\n' "$RESIDUALS_FILE" >&2
       printf 'Generate it first using RQ-VAE/compute_residuals.py.\n' >&2
