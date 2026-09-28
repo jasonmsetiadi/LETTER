@@ -1,4 +1,4 @@
-"""Compare all collaborative / popularity signals on a dataset."""
+"""Compare Semantic ID generation strategies (fixed, shortest_unique, residual, collaborative) on CPU."""
 
 import argparse
 import json
@@ -35,7 +35,7 @@ def compute_spearman_correlation(score_dict_a, score_dict_b, items):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Compare all collaborative / popularity signals for variable-length Semantic IDs."
+        description="CPU-only evaluation comparing generated Semantic IDs across strategies (fixed, shortest_unique, residual, collaborative)."
     )
     parser.add_argument("--dataset", type=str, default="Instruments", help="Dataset name.")
     parser.add_argument(
@@ -77,28 +77,58 @@ def parse_args():
     parser.add_argument("--min-length", type=int, default=1, help="Minimum SID length.")
     parser.add_argument("--max-length", type=int, default=4, help="Maximum SID length.")
     parser.add_argument(
-        "--save-indices",
+        "--include-baselines",
         action="store_true",
-        default=True,
-        help="Save generated variable-length indices for each signal (default: True).",
+        default=False,
+        help="Include Fixed (L=max_length) and Shortest Unique prefix baselines in comparison.",
     )
     parser.add_argument(
-        "--no-save-indices",
-        action="store_false",
-        dest="save_indices",
-        help="Do not write index files to disk.",
+        "--pairwise",
+        action="store_true",
+        default=False,
+        help="Compute and display pairwise Semantic ID exact match rate and length divergence matrix across strategies.",
+    )
+    parser.add_argument(
+        "--residuals-file",
+        type=str,
+        default=None,
+        help="Optional residuals JSON file to include residual truncation strategy.",
+    )
+    parser.add_argument(
+        "--residual-threshold",
+        type=float,
+        default=0.2,
+        help="Cumulative reconstruction error threshold for residual strategy (default: 0.2).",
+    )
+    parser.add_argument(
+        "--save-indices",
+        action="store_true",
+        default=False,
+        help="Also write generated variable-length index JSON files to disk (default: False).",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Directory to save report files (defaults to <data-root>/<dataset>).",
     )
     parser.add_argument(
         "--output-json",
         type=str,
         default=None,
-        help="Path to save consolidated comparison JSON.",
+        help="Path to save consolidated comparison JSON (defaults to <output-dir>/semantic_id_comparison.json).",
     )
     parser.add_argument(
         "--output-markdown",
         type=str,
         default=None,
-        help="Path to save consolidated markdown table report.",
+        help="Path to save consolidated markdown table report (defaults to <output-dir>/semantic_id_comparison.md).",
+    )
+    parser.add_argument(
+        "--no-save-report",
+        action="store_true",
+        default=False,
+        help="Do not save comparison report files (JSON/Markdown) to disk; only print to console.",
     )
     return parser.parse_args()
 
@@ -205,6 +235,7 @@ def main():
 
     # Evaluate each signal
     results = []
+    strategy_lengths = {}
     all_scores = {"frequency": raw_scores}
 
     print("\n" + "=" * 90)
@@ -212,6 +243,89 @@ def main():
     print(f" Catalog Items: {len(indices):,} | Total Interactions: {sum(raw_freqs.values()):,}")
     print(f" Length Range: [{args.min_length}, {args.max_length}]")
     print("=" * 90)
+
+    if args.include_baselines:
+        # Fixed-length baseline
+        strategy_lengths["fixed"] = {str(i): args.max_length for i in items}
+        results.append({
+            "signal": "fixed",
+            "label": f"Fixed (L={args.max_length})",
+            "basis": f"Uniform fixed codebook depth L={args.max_length}",
+            "file_tag": "fixed",
+            "mean_length": float(args.max_length),
+            "traffic_weighted_length": float(args.max_length),
+            "token_savings_pct": 0.0,
+            "spearman_rho_vs_frequency": None,
+            "length_distribution": {args.max_length: len(indices)},
+            "unique_ids": len(indices),
+            "collisions": 0,
+        })
+
+        # Shortest unique prefix baseline
+        trunc_su, lens_su = truncate_indices(
+            indices,
+            min_length=args.min_length,
+            max_length=args.max_length,
+            strategy="shortest_unique",
+        )
+        strategy_lengths["shortest_unique"] = {str(k): v for k, v in lens_su.items()}
+        su_mean = sum(lens_su.values()) / len(lens_su)
+        su_traffic_w = sum(lens_su[i] * raw_freqs.get(str(i), 0) for i in trunc_su) / total_traffic
+        su_savings = (1.0 - su_traffic_w / args.max_length) * 100.0
+        su_dist = dict(sorted(Counter(lens_su.values()).items()))
+        su_uniq = len({tuple(v) for v in trunc_su.values()})
+        su_coll = len(trunc_su) - su_uniq
+        results.append({
+            "signal": "shortest_unique",
+            "label": "Shortest Unique",
+            "basis": "Shortest unambiguous trie prefix per item",
+            "file_tag": "shortest_unique",
+            "mean_length": su_mean,
+            "traffic_weighted_length": su_traffic_w,
+            "token_savings_pct": su_savings,
+            "spearman_rho_vs_frequency": None,
+            "length_distribution": su_dist,
+            "unique_ids": su_uniq,
+            "collisions": su_coll,
+        })
+
+        # Residual strategy (if residuals file is available)
+        res_file_cand = (
+            Path(args.residuals_file)
+            if args.residuals_file
+            else dataset_dir / f"{args.dataset}.residuals.json"
+        )
+        if res_file_cand.exists():
+            with res_file_cand.open(encoding="utf-8") as rf:
+                loaded_residuals = json.load(rf)
+            trunc_res, lens_res = truncate_indices(
+                indices,
+                min_length=args.min_length,
+                max_length=args.max_length,
+                strategy="residual",
+                residuals=loaded_residuals,
+                residual_threshold=args.residual_threshold,
+            )
+            strategy_lengths["residual"] = {str(k): v for k, v in lens_res.items()}
+            res_mean = sum(lens_res.values()) / len(lens_res)
+            res_traffic_w = sum(lens_res[i] * raw_freqs.get(str(i), 0) for i in trunc_res) / total_traffic
+            res_savings = (1.0 - res_traffic_w / args.max_length) * 100.0
+            res_dist = dict(sorted(Counter(lens_res.values()).items()))
+            res_uniq = len({tuple(v) for v in trunc_res.values()})
+            res_coll = len(trunc_res) - res_uniq
+            results.append({
+                "signal": "residual",
+                "label": f"Residual (Thresh={args.residual_threshold})",
+                "basis": f"Shortest prefix with cumulative reconstruction error <= {args.residual_threshold}",
+                "file_tag": "res",
+                "mean_length": res_mean,
+                "traffic_weighted_length": res_traffic_w,
+                "token_savings_pct": res_savings,
+                "spearman_rho_vs_frequency": None,
+                "length_distribution": res_dist,
+                "unique_ids": res_uniq,
+                "collisions": res_coll,
+            })
 
     for sig in signals_to_run:
         meta = SIGNAL_METADATA.get(sig, {"label": sig, "basis": "", "file_tag": sig})
@@ -230,6 +344,7 @@ def main():
             item_scores=scores,
             item_frequencies=raw_freqs,
         )
+        strategy_lengths[sig] = {str(k): v for k, v in lengths.items()}
 
         mean_len = sum(lengths.values()) / len(lengths)
         traffic_w_len = sum(lengths[i] * raw_freqs.get(str(i), 0) for i in truncated) / total_traffic
@@ -302,16 +417,100 @@ def main():
         l2 = d.get(2, 0)
         l3 = d.get(3, 0)
         l4 = d.get(4, 0)
+        rho_val = r["spearman_rho_vs_frequency"]
+        rho_str = f"{rho_val:10.4f}" if rho_val is not None else "         -"
         print(
             f"| {r['label']:<20} | {r['mean_length']:12.3f} | {r['traffic_weighted_length']:14.3f} | "
-            f"{r['token_savings_pct']:11.1f}% | {l1:<5} | {l2:<6} | {l3:<6} | {l4:<6} | {r['spearman_rho_vs_frequency']:10.4f} |"
+            f"{r['token_savings_pct']:11.1f}% | {l1:<5} | {l2:<6} | {l3:<6} | {l4:<6} | {rho_str} |"
         )
     print(separator)
 
-    # Save Markdown output if requested
-    if args.output_markdown:
+    pairwise_match = {}
+    pairwise_mae = {}
+    pairwise_md_sections = []
+    if args.pairwise and len(results) > 1:
+        strat_keys = [r["signal"] for r in results]
+        strat_labels = [r["label"] for r in results]
+        n_strats = len(strat_keys)
+
+        for s1 in strat_keys:
+            pairwise_match[s1] = {}
+            pairwise_mae[s1] = {}
+            for s2 in strat_keys:
+                l1 = strategy_lengths[s1]
+                l2 = strategy_lengths[s2]
+                exact_matches = sum(l1.get(str(i), 0) == l2.get(str(i), 0) for i in items)
+                match_pct = (exact_matches / len(items)) * 100.0
+                mae = sum(abs(l1.get(str(i), 0) - l2.get(str(i), 0)) for i in items) / len(items)
+                pairwise_match[s1][s2] = round(match_pct, 2)
+                pairwise_mae[s1][s2] = round(mae, 3)
+
+        max_label_w = max(len(l) for l in strat_labels)
+        col_w = max(14, max_label_w + 2)
+        row_fmt = f"| {{:<{col_w}}} | " + " | ".join([f"{{:<{col_w}}}" for _ in range(n_strats)]) + " |"
+        sep_fmt = f"|{'-' * (col_w + 2)}|" + "|".join([f"{'-' * (col_w + 2)}" for _ in range(n_strats)]) + "|"
+
+        print("\n" + "=" * 90)
+        print(" Pairwise Exact Semantic ID Agreement Rate (%)")
+        print(" (Percentage of items assigned identical Semantic IDs between strategies)")
+        print("=" * 90)
+        print(row_fmt.format("Strategy", *strat_labels))
+        print(sep_fmt)
+        for s1, l1 in zip(strat_keys, strat_labels):
+            vals = [f"{pairwise_match[s1][s2]:.2f}%" for s2 in strat_keys]
+            print(row_fmt.format(l1, *vals))
+        print(sep_fmt)
+
+        print("\n" + "=" * 90)
+        print(" Pairwise Mean Absolute Length Difference (Tokens)")
+        print(" (Average token length divergence per item: sum(|L_A - L_B|) / N)")
+        print("=" * 90)
+        print(row_fmt.format("Strategy", *strat_labels))
+        print(sep_fmt)
+        for s1, l1 in zip(strat_keys, strat_labels):
+            vals = [f"{pairwise_mae[s1][s2]:.3f}" for s2 in strat_keys]
+            print(row_fmt.format(l1, *vals))
+        print(sep_fmt)
+
+        pairwise_md_sections = [
+            "## Pairwise Exact Semantic ID Agreement Rate (%)",
+            "",
+            "> Percentage of items in the catalog that receive an identical Semantic ID across strategies.",
+            "",
+            row_fmt.format("Strategy", *strat_labels),
+            sep_fmt,
+        ]
+        for s1, l1 in zip(strat_keys, strat_labels):
+            vals = [f"{pairwise_match[s1][s2]:.2f}%" for s2 in strat_keys]
+            pairwise_md_sections.append(row_fmt.format(l1, *vals))
+        pairwise_md_sections.append(sep_fmt)
+        pairwise_md_sections.append("")
+
+        pairwise_md_sections.extend([
+            "## Pairwise Mean Absolute Length Difference (Tokens)",
+            "",
+            "> Average token length difference per item (|L_A - L_B|). Lower value indicates closer length profiles.",
+            "",
+            row_fmt.format("Strategy", *strat_labels),
+            sep_fmt,
+        ])
+        for s1, l1 in zip(strat_keys, strat_labels):
+            vals = [f"{pairwise_mae[s1][s2]:.3f}" for s2 in strat_keys]
+            pairwise_md_sections.append(row_fmt.format(l1, *vals))
+        pairwise_md_sections.append(sep_fmt)
+        pairwise_md_sections.append("")
+
+    out_dir = Path(args.output_dir) if args.output_dir else dataset_dir
+    default_md = out_dir / "semantic_id_comparison.md"
+    default_json = out_dir / "semantic_id_comparison.json"
+
+    out_md = None if args.no_save_report else (Path(args.output_markdown) if args.output_markdown else default_md)
+    out_json = None if args.no_save_report else (Path(args.output_json) if args.output_json else default_json)
+
+    # Save Markdown output
+    if out_md:
         md_lines = [
-            f"# LETTER Collaborative Signal Comparison Report: {args.dataset}",
+            f"# LETTER Semantic ID Strategy Comparison Report: {args.dataset}",
             "",
             f"- **Dataset**: `{args.dataset}`",
             f"- **Items**: {len(indices):,}",
@@ -329,29 +528,37 @@ def main():
             l2 = d.get(2, 0)
             l3 = d.get(3, 0)
             l4 = d.get(4, 0)
+            rho_val = r["spearman_rho_vs_frequency"]
+            rho_str = f"{rho_val:10.4f}" if rho_val is not None else "         -"
             md_lines.append(
                 f"| {r['label']:<20} | {r['mean_length']:12.3f} | {r['traffic_weighted_length']:14.3f} | "
-                f"{r['token_savings_pct']:11.1f}% | {l1:<5} | {l2:<6} | {l3:<6} | {l4:<6} | {r['spearman_rho_vs_frequency']:10.4f} |"
+                f"{r['token_savings_pct']:11.1f}% | {l1:<5} | {l2:<6} | {l3:<6} | {l4:<6} | {rho_str} |"
             )
         md_lines.append(separator)
         md_lines.append("")
+
+        if pairwise_md_sections:
+            md_lines.extend(pairwise_md_sections)
+
         md_lines.append("## Signal Definitions & Methodologies")
         md_lines.append("")
         for r in results:
             md_lines.append(f"- **{r['label']}** (`{r['signal']}`): {r['basis']}")
-        md_path = Path(args.output_markdown)
-        md_path.parent.mkdir(parents=True, exist_ok=True)
-        with md_path.open("w", encoding="utf-8") as f:
+        out_md.parent.mkdir(parents=True, exist_ok=True)
+        with out_md.open("w", encoding="utf-8") as f:
             f.write("\n".join(md_lines) + "\n")
-        print(f"\nSaved Markdown report to: {md_path}")
+        print(f"\nSaved Markdown report to: {out_md}")
 
-    # Save JSON output if requested
-    if args.output_json:
-        json_path = Path(args.output_json)
-        json_path.parent.mkdir(parents=True, exist_ok=True)
-        with json_path.open("w", encoding="utf-8") as f:
-            json.dump({"dataset": args.dataset, "results": results}, f, indent=2)
-        print(f"Saved JSON comparison data to: {json_path}")
+    # Save JSON output
+    if out_json:
+        out_json.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"dataset": args.dataset, "results": results}
+        if pairwise_match:
+            payload["pairwise_exact_match_pct"] = pairwise_match
+            payload["pairwise_mae_tokens"] = pairwise_mae
+        with out_json.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+        print(f"Saved JSON comparison data to: {out_json}")
 
 
 if __name__ == "__main__":
