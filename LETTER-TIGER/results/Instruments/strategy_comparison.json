@@ -1,128 +1,294 @@
-[
-  {
-    "strategy": "fixed",
-    "mean_length": 4.0,
-    "weighted_length": 4.0,
-    "collisions": 0,
-    "metrics": {
-      "hit@1": 0.05962376877119328,
-      "hit@5": 0.08509607621508154,
-      "hit@10": 0.10592604553528177,
-      "ndcg@5": 0.07242907104808712,
-      "ndcg@10": 0.0791127089110418
+{
+  "strategy_comparison": [
+    {
+      "strategy": "fixed",
+      "mean_length": 4.0,
+      "weighted_length": 4.0,
+      "collisions": 0,
+      "metrics": {
+        "hit@1": 0.05962376877119328,
+        "hit@5": 0.08509607621508154,
+        "hit@10": 0.10592604553528177,
+        "ndcg@5": 0.07242907104808712,
+        "ndcg@10": 0.0791127089110418
+      },
+      "status": "completed"
     },
-    "status": "completed"
+    {
+      "strategy": "shortest_unique",
+      "mean_length": 3.0131021971376737,
+      "weighted_length": 2.7235208801230155,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.05663652510899402,
+        "hit@5": 0.07742612627159697,
+        "hit@10": 0.09526885192959793,
+        "ndcg@5": 0.06712102704168063,
+        "ndcg@10": 0.0728133179242925
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "popularity:frequency",
+      "mean_length": 3.2885506954243096,
+      "weighted_length": 3.232405058378971,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.055142903277894395,
+        "hit@5": 0.07722428548361053,
+        "hit@10": 0.09482480219602778,
+        "ndcg@5": 0.06626275944224866,
+        "ndcg@10": 0.07192025665649697
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "popularity:user_entropy",
+      "mean_length": 3.2885506954243096,
+      "weighted_length": 3.232405058378971,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.055142903277894395,
+        "hit@5": 0.07722428548361053,
+        "hit@10": 0.09482480219602778,
+        "ndcg@5": 0.06626275944224866,
+        "ndcg@10": 0.07192025665649697
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "popularity:pagerank",
+      "mean_length": 3.2901632735335617,
+      "weighted_length": 3.23777485653859,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.058251251412885514,
+        "hit@5": 0.07976747941223962,
+        "hit@10": 0.09833683190699176,
+        "ndcg@5": 0.06918391349512021,
+        "ndcg@10": 0.07511907066741648
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "popularity:target",
+      "mean_length": 3.2776657931868574,
+      "weighted_length": 3.2658122850504236,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.058251251412885514,
+        "hit@5": 0.07718391732601323,
+        "hit@10": 0.09329081220733086,
+        "ndcg@5": 0.06768402159137571,
+        "ndcg@10": 0.0728513260783559
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "popularity:composite",
+      "mean_length": 3.2885506954243096,
+      "weighted_length": 3.232405058378971,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.055142903277894395,
+        "hit@5": 0.07722428548361053,
+        "hit@10": 0.09482480219602778,
+        "ndcg@5": 0.06626275944224866,
+        "ndcg@10": 0.07192025665649697
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "popularity:cf_density",
+      "mean_length": 3.2784720822414837,
+      "weighted_length": 3.333805474574709,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.05708057484256419,
+        "hit@5": 0.07992895204262877,
+        "hit@10": 0.09999192636848055,
+        "ndcg@5": 0.06864689790033986,
+        "ndcg@10": 0.07511451613643448
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "residual",
+      "mean_length": 3.9955654101995566,
+      "weighted_length": 3.997564915378384,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.0611577587598902,
+        "hit@5": 0.08598417568222186,
+        "hit@10": 0.10673340868722751,
+        "ndcg@5": 0.07362510146160803,
+        "ndcg@10": 0.08025200360665648
+      },
+      "status": "completed"
+    }
+  ],
+  "pairwise_exact_match_pct": {
+    "fixed": {
+      "fixed": 100.0,
+      "shortest_unique": 5.64,
+      "popularity:frequency": 29.81,
+      "popularity:user_entropy": 29.81,
+      "popularity:pagerank": 29.9,
+      "popularity:target": 29.44,
+      "popularity:composite": 29.81,
+      "residual": 99.72
+    },
+    "shortest_unique": {
+      "fixed": 5.64,
+      "shortest_unique": 100.0,
+      "popularity:frequency": 62.85,
+      "popularity:user_entropy": 62.85,
+      "popularity:pagerank": 62.75,
+      "popularity:target": 63.6,
+      "popularity:composite": 62.85,
+      "residual": 5.87
+    },
+    "popularity:frequency": {
+      "fixed": 29.81,
+      "shortest_unique": 62.85,
+      "popularity:frequency": 100.0,
+      "popularity:user_entropy": 100.0,
+      "popularity:pagerank": 82.96,
+      "popularity:target": 62.93,
+      "popularity:composite": 100.0,
+      "residual": 29.88
+    },
+    "popularity:user_entropy": {
+      "fixed": 29.81,
+      "shortest_unique": 62.85,
+      "popularity:frequency": 100.0,
+      "popularity:user_entropy": 100.0,
+      "popularity:pagerank": 82.96,
+      "popularity:target": 62.93,
+      "popularity:composite": 100.0,
+      "residual": 29.88
+    },
+    "popularity:pagerank": {
+      "fixed": 29.9,
+      "shortest_unique": 62.75,
+      "popularity:frequency": 82.96,
+      "popularity:user_entropy": 82.96,
+      "popularity:pagerank": 100.0,
+      "popularity:target": 64.07,
+      "popularity:composite": 82.96,
+      "residual": 30.0
+    },
+    "popularity:target": {
+      "fixed": 29.44,
+      "shortest_unique": 63.6,
+      "popularity:frequency": 62.93,
+      "popularity:user_entropy": 62.93,
+      "popularity:pagerank": 64.07,
+      "popularity:target": 100.0,
+      "popularity:composite": 62.93,
+      "residual": 29.58
+    },
+    "popularity:composite": {
+      "fixed": 29.81,
+      "shortest_unique": 62.85,
+      "popularity:frequency": 100.0,
+      "popularity:user_entropy": 100.0,
+      "popularity:pagerank": 82.96,
+      "popularity:target": 62.93,
+      "popularity:composite": 100.0,
+      "residual": 29.88
+    },
+    "residual": {
+      "fixed": 99.72,
+      "shortest_unique": 5.87,
+      "popularity:frequency": 29.88,
+      "popularity:user_entropy": 29.88,
+      "popularity:pagerank": 30.0,
+      "popularity:target": 29.58,
+      "popularity:composite": 29.88,
+      "residual": 100.0
+    }
   },
-  {
-    "strategy": "shortest_unique",
-    "mean_length": 3.0131021971376737,
-    "weighted_length": 3.1598715517115927,
-    "collisions": 25,
-    "metrics": {
-      "hit@1": 0.05663652510899402,
-      "hit@5": 0.07742612627159697,
-      "hit@10": 0.09526885192959793,
-      "ndcg@5": 0.06712102704168063,
-      "ndcg@10": 0.0728133179242925
+  "pairwise_mae_tokens": {
+    "fixed": {
+      "fixed": 0.0,
+      "shortest_unique": 1.428,
+      "popularity:frequency": 0.921,
+      "popularity:user_entropy": 0.921,
+      "popularity:pagerank": 0.921,
+      "popularity:target": 0.94,
+      "popularity:composite": 0.921,
+      "residual": 0.003
     },
-    "status": "completed"
-  },
-  {
-    "strategy": "popularity:frequency",
-    "mean_length": 3.2885506954243096,
-    "weighted_length": 3.232405058378971,
-    "collisions": 25,
-    "metrics": {
-      "hit@1": 0.055142903277894395,
-      "hit@5": 0.07722428548361053,
-      "hit@10": 0.09482480219602778,
-      "ndcg@5": 0.06626275944224866,
-      "ndcg@10": 0.07192025665649697
+    "shortest_unique": {
+      "fixed": 1.428,
+      "shortest_unique": 0.0,
+      "popularity:frequency": 0.507,
+      "popularity:user_entropy": 0.507,
+      "popularity:pagerank": 0.507,
+      "popularity:target": 0.488,
+      "popularity:composite": 0.507,
+      "residual": 1.424
     },
-    "status": "completed"
-  },
-  {
-    "strategy": "popularity:user_entropy",
-    "mean_length": 3.2885506954243096,
-    "weighted_length": 3.232405058378971,
-    "collisions": 25,
-    "metrics": {
-      "hit@1": 0.055142903277894395,
-      "hit@5": 0.07722428548361053,
-      "hit@10": 0.09482480219602778,
-      "ndcg@5": 0.06626275944224866,
-      "ndcg@10": 0.07192025665649697
+    "popularity:frequency": {
+      "fixed": 0.921,
+      "shortest_unique": 0.507,
+      "popularity:frequency": 0.0,
+      "popularity:user_entropy": 0.0,
+      "popularity:pagerank": 0.173,
+      "popularity:target": 0.433,
+      "popularity:composite": 0.0,
+      "residual": 0.92
     },
-    "status": "completed"
-  },
-  {
-    "strategy": "popularity:pagerank",
-    "mean_length": 3.2901632735335617,
-    "weighted_length": 3.23777485653859,
-    "collisions": 25,
-    "metrics": {
-      "hit@1": 0.058251251412885514,
-      "hit@5": 0.07976747941223962,
-      "hit@10": 0.09833683190699176,
-      "ndcg@5": 0.06918391349512021,
-      "ndcg@10": 0.07511907066741648
+    "popularity:user_entropy": {
+      "fixed": 0.921,
+      "shortest_unique": 0.507,
+      "popularity:frequency": 0.0,
+      "popularity:user_entropy": 0.0,
+      "popularity:pagerank": 0.173,
+      "popularity:target": 0.433,
+      "popularity:composite": 0.0,
+      "residual": 0.92
     },
-    "status": "completed"
-  },
-  {
-    "strategy": "popularity:target",
-    "mean_length": 3.2776657931868574,
-    "weighted_length": 3.2658122850504236,
-    "collisions": 25,
-    "metrics": {
-      "hit@1": 0.058251251412885514,
-      "hit@5": 0.07718391732601323,
-      "hit@10": 0.09329081220733086,
-      "ndcg@5": 0.06768402159137571,
-      "ndcg@10": 0.0728513260783559
+    "popularity:pagerank": {
+      "fixed": 0.921,
+      "shortest_unique": 0.507,
+      "popularity:frequency": 0.173,
+      "popularity:user_entropy": 0.173,
+      "popularity:pagerank": 0.0,
+      "popularity:target": 0.417,
+      "popularity:composite": 0.173,
+      "residual": 0.92
     },
-    "status": "completed"
-  },
-  {
-    "strategy": "popularity:composite",
-    "mean_length": 3.2885506954243096,
-    "weighted_length": 3.232405058378971,
-    "collisions": 25,
-    "metrics": {
-      "hit@1": 0.055142903277894395,
-      "hit@5": 0.07722428548361053,
-      "hit@10": 0.09482480219602778,
-      "ndcg@5": 0.06626275944224866,
-      "ndcg@10": 0.07192025665649697
+    "popularity:target": {
+      "fixed": 0.94,
+      "shortest_unique": 0.488,
+      "popularity:frequency": 0.433,
+      "popularity:user_entropy": 0.433,
+      "popularity:pagerank": 0.417,
+      "popularity:target": 0.0,
+      "popularity:composite": 0.433,
+      "residual": 0.938
     },
-    "status": "completed"
-  },
-  {
-    "strategy": "popularity:cf_density",
-    "mean_length": 3.2784720822414837,
-    "weighted_length": 3.333805474574709,
-    "collisions": 25,
-    "metrics": {
-      "hit@1": 0.05708057484256419,
-      "hit@5": 0.07992895204262877,
-      "hit@10": 0.09999192636848055,
-      "ndcg@5": 0.06864689790033986,
-      "ndcg@10": 0.07511451613643448
+    "popularity:composite": {
+      "fixed": 0.921,
+      "shortest_unique": 0.507,
+      "popularity:frequency": 0.0,
+      "popularity:user_entropy": 0.0,
+      "popularity:pagerank": 0.173,
+      "popularity:target": 0.433,
+      "popularity:composite": 0.0,
+      "residual": 0.92
     },
-    "status": "completed"
-  },
-  {
-    "strategy": "residual",
-    "mean_length": 3.9955654101995566,
-    "weighted_length": 3.9948436355522357,
-    "collisions": 25,
-    "metrics": {
-      "hit@1": 0.0611577587598902,
-      "hit@5": 0.08598417568222186,
-      "hit@10": 0.10673340868722751,
-      "ndcg@5": 0.07362510146160803,
-      "ndcg@10": 0.08025200360665648
-    },
-    "status": "completed"
+    "residual": {
+      "fixed": 0.003,
+      "shortest_unique": 1.424,
+      "popularity:frequency": 0.92,
+      "popularity:user_entropy": 0.92,
+      "popularity:pagerank": 0.92,
+      "popularity:target": 0.938,
+      "popularity:composite": 0.92,
+      "residual": 0.0
+    }
   }
-]
+}
