@@ -213,35 +213,6 @@ class TruncateIndicesTest(unittest.TestCase):
         # "1" has low entropy, so it is ranked lower than "0"
         self.assertGreater(lengths["1"], lengths["0"])
 
-    def test_collaborative_target_frequency(self):
-        inter_data = {
-            "u1": ["0", "1", "2"],  # "2" is target
-            "u2": ["0", "2"],       # "2" is target
-            "u3": ["1", "0"],       # "0" is target
-        }
-        scores, freqs = truncate_indices_module.compute_interaction_signals(
-            inter_data, signal="target"
-        )
-        # "2" is target 2 times, "0" is target 1 time, "1" is target 0 times
-        self.assertEqual(scores["2"], 2.0)
-        self.assertEqual(scores["0"], 1.0)
-        self.assertEqual(scores["1"], 0.0)
-
-        indices = {
-            "0": ["<a_0>", "<b_0>", "<c_0>"],
-            "1": ["<a_1>", "<b_1>", "<c_1>"],
-            "2": ["<a_2>", "<b_2>", "<c_2>"],
-        }
-        truncated, lengths = truncate_indices_module.truncate_indices(
-            indices,
-            min_length=1,
-            max_length=3,
-            strategy="collaborative",
-            item_scores=scores,
-        )
-        self.assertEqual(lengths["2"], 1)
-        self.assertEqual(lengths["1"], 3)
-
     def test_collaborative_pagerank(self):
         # 0 -> 1, 2 -> 1, 3 -> 1: Item 1 is a major transition sink/hub
         inter_data = {

@@ -149,8 +149,6 @@ def compute_interaction_signals(
       - 'frequency': Raw item interaction count (standard unigram popularity).
       - 'user_entropy': Shannon entropy over the user audience distribution.
                         Penalizes items whose interaction volume is driven by few power users.
-      - 'target': Frequency of appearing in the sequence-final (target) position,
-                  directly optimizing inference-time generation tokens.
       - 'pagerank': Stationary distribution on the sequential transition graph.
                     Identifies global transition hubs across recommendation paths.
       - 'co_occurrence': Degree/breadth of unique co-occurring catalog items across user sessions.
@@ -168,7 +166,6 @@ def compute_interaction_signals(
 
     raw_freqs = defaultdict(int)
     user_counts = defaultdict(lambda: defaultdict(int))
-    target_counts = defaultdict(int)
     transitions = defaultdict(lambda: defaultdict(int))
     out_degrees = defaultdict(int)
     cooccur_sets = defaultdict(set)
@@ -180,7 +177,6 @@ def compute_interaction_signals(
             seq = v
             if len(seq) == 0:
                 continue
-            target_counts[str(seq[-1])] += 1
             unique_in_seq = set(str(item) for item in seq)
             for it in unique_in_seq:
                 cooccur_sets[it].update(unique_in_seq - {it})
@@ -216,12 +212,6 @@ def compute_interaction_signals(
                     h -= p * math.log2(p)
             entropy_scores[item] = h
         return entropy_scores, dict(raw_freqs)
-
-    if canonical_signal in ("target", "target_frequency"):
-        if not has_user_sequences:
-            return dict(raw_freqs), dict(raw_freqs)
-        scores = {item: float(target_counts.get(item, 0)) for item in raw_freqs}
-        return scores, dict(raw_freqs)
 
     if canonical_signal in ("pagerank", "pr"):
         if not has_user_sequences or not transitions:
@@ -259,7 +249,7 @@ def compute_interaction_signals(
         scores = compute_cf_density_scores(cf_emb_file, top_k=top_k_cf)
         return scores, dict(raw_freqs)
 
-    valid_signals = {"frequency", "user_entropy", "pagerank", "target", "co_occurrence", "cf_density"}
+    valid_signals = {"frequency", "user_entropy", "pagerank", "co_occurrence", "cf_density"}
     raise ValueError(
         f"Unknown collaborative signal '{signal}'. Valid signals are: {sorted(valid_signals)}"
     )
@@ -394,10 +384,10 @@ def main():
     parser.add_argument(
         "--collab-signal",
         "--popularity-signal",
-        choices=["frequency", "user_entropy", "pagerank", "target", "co_occurrence", "cf_density"],
+        choices=["frequency", "user_entropy", "pagerank", "co_occurrence", "cf_density"],
         default="frequency",
         dest="collab_signal",
-        help="Collaborative signal for popularity/collaborative strategy: frequency, user_entropy, pagerank, target, co_occurrence, cf_density (default: frequency).",
+        help="Collaborative signal for popularity/collaborative strategy: frequency, user_entropy, pagerank, co_occurrence, cf_density (default: frequency).",
     )
     parser.add_argument(
         "--inter-file",

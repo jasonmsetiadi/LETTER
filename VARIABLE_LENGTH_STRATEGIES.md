@@ -146,14 +146,13 @@ Given length bounds $[L_{\min}, L_{\max}]$, we construct $K = L_{\max} - L_{\min
 
 ### Collaborative Signal Options (`--collab-signal`)
 
-While raw frequency provides an intuitive baseline, the codebase supports five additional collaborative signals extracted from user-item interactions and CF manifolds:
+While raw frequency provides an intuitive baseline, the codebase supports four additional collaborative signals extracted from user-item interactions and CF manifolds:
 
 | Signal Flag | Formal Definition | Theoretical Motivation | When to Use |
 | :--- | :--- | :--- | :--- |
 | `frequency` *(default)* | $S(i) = \sum_u \sum_t \mathbb{I}(s_{u,t} = i)$ | Classical memoryless source coding ($-\log P(i)$) | Standard baseline for skewed Pareto traffic. |
 | `user_entropy` | $H(i) = -\sum_u P(u \mid i) \log_2 P(u \mid i)$ | Audience dispersion vs. power-user binging | Penalizes items whose volume is driven by few power users. |
 | `pagerank` | $\pi = (1 - d)\mathbf{v} + d P^T \pi$ | Sequential random-walk stationary centrality | Identifies structural transition hubs across user journeys. |
-| `target` | $S(i) = \sum_u \mathbb{I}(s_{u, -1} = i)$ | Next-item generation frequency | Directly optimizes tokens generated at inference time. |
 | `co_occurrence` | $S(i) = |\{j \neq i \mid C_{ij} > 0\}|$ | Cross-basket connectivity & catalog companion breadth | Prioritizes universal utility/companion items across categories. |
 | `cf_density` | $S(i) = 1 - \frac{1}{k}\sum_{j \in \mathcal{N}_k(i)} \cos(e_i, e_j)$ | Latent behavioral manifold isolation | Protects items in crowded CF clusters from colliding. |
 
@@ -228,14 +227,14 @@ python3 RQ-VAE/truncate_indices.py \
   --collab-signal pagerank \
   --inter-file data/Instruments/Instruments.inter.json
 
-# D. Target-position generation frequency (optimizes inference generation)
+# D. Co-occurrence degree (cross-basket catalog breadth)
 python3 RQ-VAE/truncate_indices.py \
   --input data/Instruments/Instruments.index.json \
-  --output data/Instruments/Instruments.index.varlen.pop-target.json \
+  --output data/Instruments/Instruments.index.varlen.pop-cooccur.json \
   --min-length 1 \
   --max-length 4 \
   --strategy collaborative \
-  --collab-signal target \
+  --collab-signal co_occurrence \
   --inter-file data/Instruments/Instruments.inter.json
 
 # E. End-to-end pipeline run across collaborative signals

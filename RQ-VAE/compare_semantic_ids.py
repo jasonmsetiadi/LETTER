@@ -49,11 +49,6 @@ SIGNAL_METADATA = {
         "basis": "Stationary distribution on transition graph i -> j",
         "file_tag": "pop-pagerank",
     },
-    "target": {
-        "label": "Target-Position Frequency",
-        "basis": "Frequency in sequence-final target position",
-        "file_tag": "pop-target",
-    },
     "co_occurrence": {
         "label": "Co-occurrence Degree",
         "basis": "Unique co-occurring items across user interaction sessions",
@@ -111,7 +106,7 @@ def parse_args():
     parser.add_argument(
         "--signals",
         type=str,
-        default="frequency,user_entropy,pagerank,target,co_occurrence,cf_density",
+        default="frequency,user_entropy,pagerank,co_occurrence,cf_density",
         help="Comma-separated list of signals to compare (default: all).",
     )
     parser.add_argument("--min-length", type=int, default=1, help="Minimum SID length.")
@@ -403,7 +398,6 @@ def evaluate_semantic_ids(
                     "raw": "frequency",
                     "entropy": "user_entropy",
                     "pr": "pagerank",
-                    "target_frequency": "target",
                     "cooccur": "co_occurrence",
                     "co_occur": "co_occurrence",
                     "cooccurrence": "co_occurrence",
@@ -419,7 +413,7 @@ def evaluate_semantic_ids(
             add_residual()
 
         if signals is None:
-            sig_list = ["frequency", "user_entropy", "pagerank", "target", "co_occurrence", "cf_density"]
+            sig_list = ["frequency", "user_entropy", "pagerank", "co_occurrence", "cf_density"]
         elif isinstance(signals, str):
             sig_list = [s.strip() for s in signals.replace(" ", ",").split(",") if s.strip()]
         else:
