@@ -61,19 +61,28 @@ def main():
     ckpt_args = ckpt["args"]
     state_dict = ckpt["state_dict"]
 
-    data_path = args.data_path or ckpt_args.data_path
+    def get_arg(name, default=None):
+        if isinstance(ckpt_args, dict):
+            return ckpt_args.get(name, default)
+        return getattr(ckpt_args, name, default)
+
+    data_path = args.data_path or get_arg("data_path")
     data = EmbDataset(data_path)
     data_loader = DataLoader(data, batch_size=args.batch_size, shuffle=False)
 
     model = RQVAE(
         in_dim=data.dim,
-        num_emb_list=ckpt_args.num_emb_list,
-        e_dim=ckpt_args.e_dim,
-        layers=ckpt_args.layers,
-        dropout_prob=ckpt_args.dropout_prob,
-        bn=ckpt_args.bn,
-        loss_type=ckpt_args.loss_type,
-        quant_loss_weight=ckpt_args.quant_loss_weight,
+        num_emb_list=get_arg("num_emb_list"),
+        e_dim=get_arg("e_dim"),
+        layers=get_arg("layers"),
+        dropout_prob=get_arg("dropout_prob", 0.0),
+        bn=get_arg("bn", False),
+        loss_type=get_arg("loss_type", "mse"),
+        quant_loss_weight=get_arg("quant_loss_weight", 1.0),
+        kmeans_init=get_arg("kmeans_init", False),
+        kmeans_iters=get_arg("kmeans_iters", 100),
+        sk_epsilons=get_arg("sk_epsilons", None),
+        sk_iters=get_arg("sk_iters", 100),
     )
     model.load_state_dict(state_dict, strict=False)
     model = model.to(device)

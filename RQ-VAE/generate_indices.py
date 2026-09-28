@@ -96,21 +96,25 @@ except TypeError:
 args = ckpt["args"]
 state_dict = ckpt["state_dict"]
 
+def get_arg(name, default=None):
+    if isinstance(args, dict):
+        return args.get(name, default)
+    return getattr(args, name, default)
 
-data = EmbDataset(args.data_path)
+data = EmbDataset(get_arg("data_path"))
 
 model = RQVAE(in_dim=data.dim,
-                  num_emb_list=args.num_emb_list,
-                  e_dim=args.e_dim,
-                  layers=args.layers,
-                  dropout_prob=args.dropout_prob,
-                  bn=args.bn,
-                  loss_type=args.loss_type,
-                  quant_loss_weight=args.quant_loss_weight,
-                  kmeans_init=args.kmeans_init,
-                  kmeans_iters=args.kmeans_iters,
-                  sk_epsilons=args.sk_epsilons,
-                  sk_iters=args.sk_iters,
+                  num_emb_list=get_arg("num_emb_list"),
+                  e_dim=get_arg("e_dim"),
+                  layers=get_arg("layers"),
+                  dropout_prob=get_arg("dropout_prob", 0.0),
+                  bn=get_arg("bn", False),
+                  loss_type=get_arg("loss_type", "mse"),
+                  quant_loss_weight=get_arg("quant_loss_weight", 1.0),
+                  kmeans_init=get_arg("kmeans_init", False),
+                  kmeans_iters=get_arg("kmeans_iters", 100),
+                  sk_epsilons=get_arg("sk_epsilons", None),
+                  sk_iters=get_arg("sk_iters", 100),
                   )
 
 model.load_state_dict(state_dict,strict=False)

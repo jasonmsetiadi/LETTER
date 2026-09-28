@@ -41,6 +41,8 @@ class RQVAE(nn.Module):
         self.quant_loss_weight=quant_loss_weight
         self.kmeans_init = kmeans_init
         self.kmeans_iters = kmeans_iters
+        if sk_epsilons is None and num_emb_list is not None:
+            sk_epsilons = [0.0] * (len(num_emb_list) - 1) + [0.003] if len(num_emb_list) > 0 else []
         self.sk_epsilons = sk_epsilons
         self.sk_iters = sk_iters
         self.cf_embedding = cf_embedding

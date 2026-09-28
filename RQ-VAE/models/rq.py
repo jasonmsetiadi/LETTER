@@ -6,7 +6,7 @@ from .vq import VectorQuantizer
 
 class ResidualVectorQuantizer(nn.Module):
 
-    def __init__(self, n_e_list, e_dim, sk_epsilons, beta = 1,
+    def __init__(self, n_e_list, e_dim, sk_epsilons=None, beta = 1,
                  kmeans_init = False, kmeans_iters = 100, sk_iters=100,):
         super().__init__()
         self.n_e_list = n_e_list
@@ -14,6 +14,15 @@ class ResidualVectorQuantizer(nn.Module):
         self.num_quantizers = len(n_e_list)
         self.kmeans_init = kmeans_init
         self.kmeans_iters = kmeans_iters
+        if sk_epsilons is None:
+            sk_epsilons = [0.0] * (len(n_e_list) - 1) + [0.003] if len(n_e_list) > 0 else []
+        elif isinstance(sk_epsilons, (int, float)):
+            sk_epsilons = [float(sk_epsilons)] * len(n_e_list)
+        elif len(sk_epsilons) != len(n_e_list):
+            if len(sk_epsilons) < len(n_e_list):
+                sk_epsilons = list(sk_epsilons) + [0.0] * (len(n_e_list) - len(sk_epsilons))
+            else:
+                sk_epsilons = list(sk_epsilons)[:len(n_e_list)]
         self.sk_epsilons = sk_epsilons
         self.sk_iters = sk_iters
         self.vq_layers = nn.ModuleList([VectorQuantizer(n_e, e_dim, beta=beta,
@@ -21,7 +30,7 @@ class ResidualVectorQuantizer(nn.Module):
                                                         kmeans_iters = self.kmeans_iters,
                                                         sk_epsilon=sk_epsilon,
                                                         sk_iters=sk_iters)
-                                        for n_e, sk_epsilon in zip(n_e_list,sk_epsilons) ])
+                                        for n_e, sk_epsilon in zip(n_e_list, self.sk_epsilons) ])
 
 
     def get_codebook(self):
