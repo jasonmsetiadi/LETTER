@@ -137,6 +137,9 @@ fi
 
 INTER_FILE="${INTER_FILE:-$DATA_ROOT/$DATASET/$DATASET.inter.json}"
 RESIDUALS_FILE="${RESIDUALS_FILE:-$DATA_ROOT/$DATASET/$DATASET.residuals.json}"
+if [[ -z "$CF_EMB_FILE" && -f "$REPO_ROOT/RQ-VAE/ckpt/$DATASET-32d-sasrec.pt" ]]; then
+  CF_EMB_FILE="$REPO_ROOT/RQ-VAE/ckpt/$DATASET-32d-sasrec.pt"
+fi
 
 # Parse and expand strategies
 EXPANDED_STRATEGIES=()

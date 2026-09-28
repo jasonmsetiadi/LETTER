@@ -230,6 +230,9 @@ case "$STRATEGY" in
         ;;
     esac
     INTER_FILE="${INTER_FILE:-$DATA_ROOT/$DATASET/$DATASET.inter.json}"
+    if [[ -z "$CF_EMB_FILE" && -f "$REPO_ROOT/RQ-VAE/ckpt/$DATASET-32d-sasrec.pt" ]]; then
+      CF_EMB_FILE="$REPO_ROOT/RQ-VAE/ckpt/$DATASET-32d-sasrec.pt"
+    fi
     if [[ ! -f "$INTER_FILE" && "$COLLAB_SIGNAL" != "cf_density" ]]; then
       printf 'Interaction file not found for %s strategy: %s\n' "$STRATEGY" "$INTER_FILE" >&2
       exit 1
