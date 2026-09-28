@@ -1,0 +1,72 @@
+[
+  {
+    "strategy": "popularity:frequency",
+    "mean_length": 3.2885506954243096,
+    "weighted_length": 3.232405058378971,
+    "collisions": 25,
+    "metrics": {
+      "hit@1": 0.055142903277894395,
+      "hit@5": 0.07722428548361053,
+      "hit@10": 0.09482480219602778,
+      "ndcg@5": 0.06626275944224866,
+      "ndcg@10": 0.07192025665649697
+    },
+    "status": "completed"
+  },
+  {
+    "strategy": "popularity:user_entropy",
+    "mean_length": 3.2885506954243096,
+    "weighted_length": 3.232405058378971,
+    "collisions": 25,
+    "metrics": {
+      "hit@1": 0.055142903277894395,
+      "hit@5": 0.07722428548361053,
+      "hit@10": 0.09482480219602778,
+      "ndcg@5": 0.06626275944224866,
+      "ndcg@10": 0.07192025665649697
+    },
+    "status": "completed"
+  },
+  {
+    "strategy": "popularity:pagerank",
+    "mean_length": 3.2901632735335617,
+    "weighted_length": 3.23777485653859,
+    "collisions": 25,
+    "metrics": {
+      "hit@1": 0.058251251412885514,
+      "hit@5": 0.07976747941223962,
+      "hit@10": 0.09833683190699176,
+      "ndcg@5": 0.06918391349512021,
+      "ndcg@10": 0.07511907066741648
+    },
+    "status": "completed"
+  },
+  {
+    "strategy": "popularity:target",
+    "mean_length": 3.2776657931868574,
+    "weighted_length": 3.2658122850504236,
+    "collisions": 25,
+    "metrics": {
+      "hit@1": 0.058251251412885514,
+      "hit@5": 0.07718391732601323,
+      "hit@10": 0.09329081220733086,
+      "ndcg@5": 0.06768402159137571,
+      "ndcg@10": 0.0728513260783559
+    },
+    "status": "completed"
+  },
+  {
+    "strategy": "popularity:composite",
+    "mean_length": 3.2885506954243096,
+    "weighted_length": 3.232405058378971,
+    "collisions": 25,
+    "metrics": {
+      "hit@1": 0.055142903277894395,
+      "hit@5": 0.07722428548361053,
+      "hit@10": 0.09482480219602778,
+      "ndcg@5": 0.06626275944224866,
+      "ndcg@10": 0.07192025665649697
+    },
+    "status": "completed"
+  }
+]
