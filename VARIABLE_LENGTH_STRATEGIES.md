@@ -123,25 +123,28 @@ In sequential recommendation, user histories are sequences of items $s = (i_1, i
 $$\mathbb{E}[\text{Decoding Length}] = \sum_{i \in \mathcal{I}} P(i) \cdot \text{len}(i)$$
 where $P(i) = \frac{\text{freq}(i)}{\sum_j \text{freq}(j)}$.
 
-### Mathematical Formulation & Quantile Tiering
+### Mathematical Formulation & Cumulative Mass (CDF) Tiering
 Given length bounds $[L_{\min}, L_{\max}]$, we construct $K = L_{\max} - L_{\min} + 1$ discrete length tiers based on empirical interaction scores:
 
-1. **Rank all items** by collaborative score $S(i)$:
-   $$\text{rank}(i) \in [0, |\mathcal{I}| - 1] \quad \text{where } S_{(0)} \le S_{(1)} \le \dots \le S_{(|\mathcal{I}|-1)}$$
+1. **Sort all items ascending** by collaborative score $S(i)$:
+   $$\mathcal{I}_{\text{sorted}} = (i_{(0)}, i_{(1)}, \dots, i_{(|\mathcal{I}|-1)}) \quad \text{where } S(i_{(0)}) \le S(i_{(1)}) \le \dots \le S(i_{(|\mathcal{I}|-1)})$$
 
-2. **Assign Minimum Allowable Length**:
-   $$\text{tier}(i) = \min\left(\left\lfloor \frac{\text{rank}(i) \cdot K}{|\mathcal{I}|} \right\rfloor, K - 1\right) \in \{0, 1, \dots, K-1\}$$
+2. **Compute Cumulative Mass Fraction (CDF)**:
+   $$\text{CDF}(i) = \frac{\sum_{j \le \text{rank}(i)} S(i_{(j)})}{\sum_{k \in \mathcal{I}} S(k)} \in [0, 1]$$
+
+3. **Assign Minimum Allowable Length**:
+   $$\text{tier}(i) = \min\left(\left\lfloor \text{CDF}(i) \cdot K \right\rfloor, K - 1\right) \in \{0, 1, \dots, K-1\}$$
    $$l_{\min}(i) = L_{\max} - \text{tier}(i)$$
 
-3. **Truncation Rule**:
+4. **Truncation Rule**:
    $$\text{len}(i) = \min \big\{ l \in [l_{\min}(i), L_{\max}] : \text{count}(c_{1:l}^{(i)}) = 1 \big\}$$
 
 ```
-                   Popularity Distribution Tiering (K = 4)
-  0% ------------------------ Percentile ------------------------ 100%
-  [  Tier 0 (Tail)  |  Tier 1 (Mid-Low)  |  Tier 2 (Mid-High)  |  Tier 3 (Head)  ]
-  [  min_len = 4    |  min_len = 3       |  min_len = 2        |  min_len = 1    ]
-  [ Tail Protected  |    Light Comp.     |   Moderate Comp.    |  Maximal Comp.  ]
+                 Cumulative Mass (CDF) Distribution Tiering (K = 4)
+  0% -------------------- Cumulative Signal Mass -------------------- 100%
+  [  Tier 0 (Tail Mass) | Tier 1 (Mid-Low Mass)| Tier 2 (Mid-High Mass)| Tier 3 (Head Mass) ]
+  [    min_len = 4      |     min_len = 3      |      min_len = 2      |    min_len = 1     ]
+  [ ~70% Catalog Items  |  ~20% Catalog Items  |   ~7% Catalog Items   |  ~3% Catalog Items ]
 ```
 
 ### Collaborative Signal Options (`--collab-signal`)

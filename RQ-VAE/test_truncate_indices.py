@@ -78,21 +78,26 @@ class TruncateIndicesTest(unittest.TestCase):
     def test_popularity_strategy_distribution(self):
         # 4 items with distinct prefixes across layers 1 to 4
         # Range 1 to 4 -> 4 tiers:
-        # Tier 0 (lowest freq): min_len = 4
+        # Tier 0 (lowest freq mass): min_len = 4
         # Tier 1: min_len = 3
         # Tier 2: min_len = 2
-        # Tier 3 (highest freq): min_len = 1
+        # Tier 3 (highest freq mass): min_len = 1
         indices = {
             "0": ["<a_0>", "<b_0>", "<c_0>", "<d_0>"],  # High freq
             "1": ["<a_1>", "<b_1>", "<c_1>", "<d_1>"],  # Mid-high freq
             "2": ["<a_2>", "<b_2>", "<c_2>", "<d_2>"],  # Mid-low freq
             "3": ["<a_3>", "<b_3>", "<c_3>", "<d_3>"],  # Rare / tail
         }
+        # In cumulative mass tiering, 4 quartiles of mass (total = 100):
+        # Item 3: 10 (cum 10 / 100 = 0.10) -> tier 0 -> min_len = 4
+        # Item 2: 20 (cum 30 / 100 = 0.30) -> tier 1 -> min_len = 3
+        # Item 1: 30 (cum 60 / 100 = 0.60) -> tier 2 -> min_len = 2
+        # Item 0: 40 (cum 100 / 100 = 1.00) -> tier 3 -> min_len = 1
         freqs = {
-            "0": 1000,
-            "1": 100,
-            "2": 10,
-            "3": 1,
+            "0": 40,
+            "1": 30,
+            "2": 20,
+            "3": 10,
         }
 
         truncated, lengths = truncate_indices_module.truncate_indices(
@@ -103,24 +108,47 @@ class TruncateIndicesTest(unittest.TestCase):
             item_frequencies=freqs,
         )
 
-        # "0" is top tier (rank 3/4 -> tier 3): min_length=1 -> truncated to 1
+        # "0" is top tier: min_length=1 -> truncated to 1
         self.assertEqual(lengths["0"], 1)
         self.assertEqual(truncated["0"], ["<a_0>"])
 
-        # "1" is tier 2 (rank 2/4): min_length=2 -> truncated to 2
+        # "1" is tier 2: min_length=2 -> truncated to 2
         self.assertEqual(lengths["1"], 2)
         self.assertEqual(truncated["1"], ["<a_1>", "<b_1>"])
 
-        # "2" is tier 1 (rank 1/4): min_length=3 -> truncated to 3
+        # "2" is tier 1: min_length=3 -> truncated to 3
         self.assertEqual(lengths["2"], 3)
         self.assertEqual(truncated["2"], ["<a_2>", "<b_2>", "<c_2>"])
 
-        # "3" is bottom tier (rank 0/4): min_length=4 -> stays at 4
+        # "3" is bottom tier: min_length=4 -> stays at 4
         self.assertEqual(lengths["3"], 4)
         self.assertEqual(truncated["3"], ["<a_3>", "<b_3>", "<c_3>", "<d_3>"])
 
         # All IDs are unique
         self.assertEqual(len({tuple(tokens) for tokens in truncated.values()}), 4)
+
+    def test_cumulative_mass_protects_skewed_tail(self):
+        # In skewed power-law traffic (1000, 100, 10, 1), tail items (1, 10, 100)
+        # account for only 10% of total mass. Cumulative mass keeps them at length 4,
+        # while only item 0 (90% of mass) reaches length 1.
+        indices = {
+            "0": ["<a_0>", "<b_0>", "<c_0>", "<d_0>"],
+            "1": ["<a_1>", "<b_1>", "<c_1>", "<d_1>"],
+            "2": ["<a_2>", "<b_2>", "<c_2>", "<d_2>"],
+            "3": ["<a_3>", "<b_3>", "<c_3>", "<d_3>"],
+        }
+        freqs = {"0": 1000, "1": 100, "2": 10, "3": 1}
+        truncated, lengths = truncate_indices_module.truncate_indices(
+            indices,
+            min_length=1,
+            max_length=4,
+            strategy="popularity",
+            item_frequencies=freqs,
+        )
+        self.assertEqual(lengths["0"], 1)
+        self.assertEqual(lengths["1"], 4)
+        self.assertEqual(lengths["2"], 4)
+        self.assertEqual(lengths["3"], 4)
 
     def test_popularity_strategy_requires_frequencies(self):
         indices = {"0": ["<a_0>", "<b_0>"]}

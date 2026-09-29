@@ -271,9 +271,11 @@ def truncate_indices(
     Strategies:
       - 'shortest_unique': Truncate to the shortest catalog-unique prefix in [min_length, max_length].
       - 'popularity' / 'collaborative': Partition items into length tiers based on empirical
-                        interaction scores (frequency, user entropy, PageRank, etc.).
-                        High-scoring items can truncate down to min_length; rare tail items
-                        are preserved at max_length.
+                        interaction scores (frequency, user entropy, PageRank, etc.) via Cumulative
+                        Mass (CDF) Tiering (Huffman / Source Coding principle).
+                        Items are sorted ascending by score; cumulative fraction of total score mass
+                        defines tier boundaries, naturally protecting long-tail items at max_length
+                        while compressing high-traffic head items.
       - 'residual': Truncate to the shortest unique prefix whose cumulative reconstruction error
                     is at or below residual_threshold.
     """
@@ -314,10 +316,23 @@ def truncate_indices(
             sorted_items = sorted(
                 indices.keys(), key=lambda k: (float(ranking_scores.get(str(k), 0.0)), str(k))
             )
-            n_items = len(sorted_items)
-            for rank, item_id in enumerate(sorted_items):
-                tier = min(int(rank * k_levels / n_items), k_levels - 1)
-                item_min_len[item_id] = max_length - tier
+            # Cumulative Mass (CDF) Tiering (Huffman / Source Coding principle)
+            raw_vals = [float(ranking_scores.get(str(k), 0.0)) for k in sorted_items]
+            min_val = min(raw_vals) if raw_vals else 0.0
+            offset = abs(min_val) if min_val < 0.0 else 0.0
+            adjusted_scores = {k: float(ranking_scores.get(str(k), 0.0)) + offset for k in sorted_items}
+            total_mass = sum(adjusted_scores.values())
+
+            if total_mass <= 0.0:
+                for item_id in sorted_items:
+                    item_min_len[item_id] = max_length
+            else:
+                cum_mass = 0.0
+                for item_id in sorted_items:
+                    cum_mass += adjusted_scores[item_id]
+                    norm_cdf = min(1.0, max(0.0, cum_mass / total_mass))
+                    tier = min(int(norm_cdf * k_levels), k_levels - 1)
+                    item_min_len[item_id] = max_length - tier
     elif strategy == "residual":
         if residuals is None:
             raise ValueError("strategy='residual' requires residuals.")
