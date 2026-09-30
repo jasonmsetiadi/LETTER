@@ -132,11 +132,11 @@ class Trainer(object):
                     ncols=100,
                     desc=set_color(f"Train {epoch_idx}","pink"),
                     )
-        embs  = [layer.embedding.weight.cpu().detach().numpy() for layer in self.model.rq.vq_layers]
-
-        for idx, emb in enumerate(embs):
-            centers, labels = self.constrained_km(emb)
-            self.labels[str(idx)] = labels
+        if getattr(self.model, "beta", 0) > 0:
+            embs  = [layer.embedding.weight.cpu().detach().numpy() for layer in self.model.rq.vq_layers]
+            for idx, emb in enumerate(embs):
+                centers, labels = self.constrained_km(emb)
+                self.labels[str(idx)] = labels
 
         for batch_idx, data in enumerate(iter_data):
             data, emb_idx = data[0], data[1]
@@ -151,7 +151,7 @@ class Trainer(object):
             # iter_data.set_postfix_str("Loss: {:.4f}, RQ Loss: {:.4f}".format(loss.item(),rq_loss.item()))
             total_loss += loss.item()
             total_recon_loss += loss_recon.item()
-            total_cf_loss += (cf_loss.item() if cf_loss != 0 else cf_loss)
+            total_cf_loss += (cf_loss.item() if hasattr(cf_loss, 'item') else (cf_loss if cf_loss != 0 else 0))
             total_quant_loss += quant_loss.item()
 
         return total_loss, total_recon_loss, total_cf_loss, quant_loss.item()
@@ -170,10 +170,11 @@ class Trainer(object):
         indices_set = set()
 
         num_sample = 0
-        embs  = [layer.embedding.weight.cpu().detach().numpy() for layer in self.model.rq.vq_layers]
-        for idx, emb in enumerate(embs):
-            centers, labels = self.constrained_km(emb)
-            self.labels[str(idx)] = labels
+        if getattr(self.model, "beta", 0) > 0:
+            embs  = [layer.embedding.weight.cpu().detach().numpy() for layer in self.model.rq.vq_layers]
+            for idx, emb in enumerate(embs):
+                centers, labels = self.constrained_km(emb)
+                self.labels[str(idx)] = labels
         for batch_idx, data in enumerate(iter_data):
 
             data, emb_idx = data[0], data[1]

@@ -294,7 +294,10 @@ else
     FIXED_INDEX_NAME="$DATASET.index.fixed-for-varlen.json"
     FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/$FIXED_INDEX_NAME"
     if [[ ! -f "$FIXED_INDEX_FILE" ]]; then
-      if [[ -f "$DATA_ROOT/$DATASET/$DATASET.index.fixed.json" ]]; then
+      if [[ -f "$DATA_ROOT/$DATASET/letter/$DATASET.index.fixed.json" ]]; then
+        FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/letter/$DATASET.index.fixed.json"
+        FIXED_INDEX_NAME="letter/$DATASET.index.fixed.json"
+      elif [[ -f "$DATA_ROOT/$DATASET/$DATASET.index.fixed.json" ]]; then
         FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/$DATASET.index.fixed.json"
         FIXED_INDEX_NAME="$DATASET.index.fixed.json"
       elif [[ -f "$DATA_ROOT/$DATASET/$DATASET.index.json" ]]; then
@@ -306,7 +309,10 @@ else
     FIXED_INDEX_NAME="$DATASET.index.fixed-for-varlen.L${NUM_LAYERS}.json"
     FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/$FIXED_INDEX_NAME"
     if [[ ! -f "$FIXED_INDEX_FILE" ]]; then
-      if [[ -f "$DATA_ROOT/$DATASET/$DATASET.index.fixed.L${NUM_LAYERS}.json" ]]; then
+      if [[ -f "$DATA_ROOT/$DATASET/letter/$DATASET.index.fixed.L${NUM_LAYERS}.json" ]]; then
+        FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/letter/$DATASET.index.fixed.L${NUM_LAYERS}.json"
+        FIXED_INDEX_NAME="letter/$DATASET.index.fixed.L${NUM_LAYERS}.json"
+      elif [[ -f "$DATA_ROOT/$DATASET/$DATASET.index.fixed.L${NUM_LAYERS}.json" ]]; then
         FIXED_INDEX_FILE="$DATA_ROOT/$DATASET/$DATASET.index.fixed.L${NUM_LAYERS}.json"
         FIXED_INDEX_NAME="$DATASET.index.fixed.L${NUM_LAYERS}.json"
       fi

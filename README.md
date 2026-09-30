@@ -96,9 +96,13 @@ TIGER pipeline with:
 bash run_fixed_length_pipeline.sh --dataset Instruments
 ```
 
-The runner creates `data/Instruments/Instruments.index.fixed.json` instead of
-overwriting the bundled index. It defaults to TIGER on two GPUs. To also train
-and evaluate LC-Rec, provide a local LLaMA checkpoint and four GPUs:
+The runner stores tokenizer checkpoints in `checkpoint/Instruments/<tokenizer>/`,
+index files in `data/Instruments/<tokenizer>/Instruments.index.fixed.json`
+(falling back to `data/Instruments/Instruments.index.fixed.json` if a legacy file
+already exists), model checkpoints in `ckpt/Instruments/<tokenizer>/`, and
+evaluation metrics in `results/Instruments/<tokenizer>/`. It defaults to TIGER on
+two GPUs. To also train and evaluate LC-Rec, provide a local LLaMA checkpoint and
+four GPUs:
 
 ```
 bash run_fixed_length_pipeline.sh \
@@ -107,10 +111,14 @@ bash run_fixed_length_pipeline.sh \
   --base-model /absolute/path/to/llama
 ```
 
+Use `--tokenizer letter` (default) or `--tokenizer rqvae` (vanilla RQ-VAE) to
+select between the LETTER tokenizer (with collaborative alignment loss and
+diversity regularization) and a standard vanilla RQ-VAE (semantic reconstruction
+only). You can also pass `--tokenizer letter,rqvae` to train and evaluate both.
 Use `--rqvae-checkpoint PATH` to skip RQ-VAE training, `--models tiger` or
 `--models lcrec` to select a downstream model, and `--skip-evaluation` to omit
-the final test stage. It uses the paper-script defaults `--alpha 0.01` and
-`--beta 0.0001`; override them when needed. Existing generated indexes are
+the final test stage. For LETTER, it uses the paper-script defaults `--alpha 0.01`
+and `--beta 0.0001`; override them when needed. Existing generated indexes are
 protected unless `--overwrite-index` is supplied.
 
 ### Variable-length end-to-end pipeline

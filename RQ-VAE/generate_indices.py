@@ -144,12 +144,11 @@ def constrained_km(data, n_clusters=10):
     return t_centers, t_labels
 
 labels = {str(i): [] for i in range(len(model.rq.vq_layers))}
-embs  = [layer.embedding.weight.cpu().detach().numpy() for layer in model.rq.vq_layers]
-
-
-for idx, emb in enumerate(embs):
-    centers, label = constrained_km(emb)
-    labels[str(idx)] = label
+if getattr(model, "beta", 0) > 0:
+    embs  = [layer.embedding.weight.cpu().detach().numpy() for layer in model.rq.vq_layers]
+    for idx, emb in enumerate(embs):
+        centers, label = constrained_km(emb)
+        labels[str(idx)] = label
 for d in tqdm(data_loader):
     d, emb_idx = d[0], d[1]
     d = d.to(device)
@@ -215,6 +214,10 @@ for item, indices in enumerate(all_indices.tolist()):
     all_indices_dict[item] = list(indices)
 
 
+
+out_dir = os.path.dirname(output_file)
+if out_dir:
+    os.makedirs(out_dir, exist_ok=True)
 
 with open(output_file, 'w') as fp:
     json.dump(all_indices_dict,fp)

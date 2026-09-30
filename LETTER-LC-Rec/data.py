@@ -39,9 +39,23 @@ class BaseDataset(Dataset):
         self.indices_validated = False
 
 
-    def _load_data(self):
+    def _resolve_index_file(self):
+        if os.path.isfile(self.index_file):
+            return self.index_file
+        cand = os.path.join(self.data_path, self.index_file)
+        if os.path.isfile(cand):
+            return cand
+        cand = os.path.join(self.data_path, self.dataset + self.index_file)
+        if os.path.isfile(cand):
+            return cand
+        if hasattr(self.args, "data_path"):
+            cand = os.path.join(self.args.data_path, self.index_file)
+            if os.path.isfile(cand):
+                return cand
+        return os.path.join(self.data_path, self.dataset + self.index_file)
 
-        with open(os.path.join(self.data_path, self.dataset + self.index_file), 'r') as f:
+    def _load_data(self):
+        with open(self._resolve_index_file(), 'r') as f:
             self.indices = json.load(f)
 
     def get_new_tokens(self):
@@ -169,7 +183,7 @@ class SeqRecDataset(BaseDataset):
 
         with open(os.path.join(self.data_path, self.dataset + ".inter.json"), 'r') as f:
             self.inters = json.load(f)
-        with open(os.path.join(self.data_path, self.dataset + self.index_file), 'r') as f:
+        with open(self._resolve_index_file(), 'r') as f:
             self.indices = json.load(f)
 
 
@@ -345,7 +359,7 @@ class FusionSeqRecDataset(BaseDataset):
 
         with open(os.path.join(self.data_path, self.dataset + ".inter.json"), 'r') as f:
             self.inters = json.load(f)
-        with open(os.path.join(self.data_path, self.dataset + self.index_file), 'r') as f:
+        with open(self._resolve_index_file(), 'r') as f:
             self.indices = json.load(f)
         with open(os.path.join(self.data_path, self.dataset + ".item.json"), 'r') as f:
             self.item_feat = json.load(f)
@@ -532,7 +546,7 @@ class ItemFeatDataset(BaseDataset):
 
     def _load_data(self):
 
-        with open(os.path.join(self.data_path, self.dataset + self.index_file), 'r') as f:
+        with open(self._resolve_index_file(), 'r') as f:
             self.indices = json.load(f)
         with open(os.path.join(self.data_path, self.dataset + ".item.json"), 'r') as f:
             self.item_feat = json.load(f)
@@ -605,7 +619,7 @@ class ItemSearchDataset(BaseDataset):
 
     def _load_data(self):
 
-        with open(os.path.join(self.data_path, self.dataset + self.index_file), 'r') as f:
+        with open(self._resolve_index_file(), 'r') as f:
             self.indices = json.load(f)
         with open(os.path.join(self.data_path, self.dataset + ".user.json"), 'r') as f:
             self.user_info = json.load(f)
@@ -726,7 +740,7 @@ class PreferenceObtainDataset(BaseDataset):
             self.user_info = json.load(f)
         with open(os.path.join(self.data_path, self.dataset + ".inter.json"), 'r') as f:
             self.inters = json.load(f)
-        with open(os.path.join(self.data_path, self.dataset + self.index_file), 'r') as f:
+        with open(self._resolve_index_file(), 'r') as f:
             self.indices = json.load(f)
 
 
@@ -821,7 +835,7 @@ class SeqRecTestDataset(BaseDataset):
 
         with open(os.path.join(self.data_path, self.dataset + ".inter.json"), 'r') as f:
             self.inters = json.load(f)
-        with open(os.path.join(self.data_path, self.dataset + self.index_file), 'r') as f:
+        with open(self._resolve_index_file(), 'r') as f:
             self.indices = json.load(f)
 
 

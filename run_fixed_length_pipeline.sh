@@ -6,33 +6,35 @@ usage() {
 Usage:
   bash run_fixed_length_pipeline.sh --dataset DATASET [options]
 
-Starts after item embeddings have been generated. It trains the fixed four-code
-RQ-VAE tokenizer, writes a new index file, then trains and evaluates selected
-downstream recommenders.
+Starts after item embeddings have been generated. It trains or reuses the
+selected tokenizer (letter or vanilla rqvae), writes a new index file, then
+trains and evaluates selected downstream recommenders.
 
 Required:
   --dataset NAME
 
 Options:
+  --tokenizer LIST             Comma-separated tokenizer(s): letter, rqvae (default: letter)
   --data-root PATH             Dataset directory parent (default: <repo>/data)
   --embedding-file PATH        Item embedding .npy path
-  --cf-embedding PATH          Collaborative-filtering embedding .pt path
-  --rqvae-checkpoint PATH      Reuse an existing RQ-VAE checkpoint (autodetected if omitted)
+  --cf-embedding PATH          Collaborative-filtering embedding .pt path (required for letter)
+  --rqvae-checkpoint PATH      Reuse an existing RQ-VAE/LETTER checkpoint (autodetected if omitted)
   --retrain-rqvae              Force training RQ-VAE even if a checkpoint exists
   --rqvae-epochs COUNT         RQ-VAE epochs (default: 10000)
   --rqvae-eval-step COUNT      RQ-VAE validation interval (default: 2000)
   --rqvae-device DEVICE        RQ-VAE device (default: cuda:0)
-  --alpha VALUE                Collaborative-loss weight (default: 0.01)
+  --alpha VALUE                Collaborative-loss weight (default: 0.01 for letter, 0.0 for rqvae)
+  --beta VALUE                 Diversity-loss weight (default: 0.0001 for letter, 0.0 for rqvae)
   --num-layers COUNT           Number of RQ-VAE codebook layers / SID length (default: 4)
   --num-emb-list LIST          Explicit codebook sizes (e.g. "256 256 256 256 256")
-  --index-name NAME            Generated index filename (default: <dataset>.index.fixed[.L<k>].json)
+  --index-name NAME            Generated index filename (default: <data-root>/<dataset>/<tok>/<dataset>.index.fixed[.L<k>].json)
   --overwrite-index            Replace an existing generated index
   --tokenizer-only             Stop after fixed-length index generation
   --models LIST                Comma-separated: tiger,lcrec (default: tiger)
   --base-model PATH            Base model for LC-Rec (default: huggyllama/llama-7b)
   --tiger-gpus IDS             CUDA devices for TIGER (default: autodetect, up to 2)
   --lcrec-gpus IDS             CUDA devices for LC-Rec (default: autodetect, up to 4)
-  --results-file PATH          Results JSON path (default: <model>/results/<dataset>/fixed[_L<k>].json)
+  --results-file PATH          Results JSON path (default: <model>/results/<dataset>/<tok>/fixed[_L<k>].json)
   --skip-evaluation            Train selected recommenders without evaluation
   --python PATH                Python executable (default: python3)
   -h, --help                   Show this help
@@ -76,8 +78,9 @@ RETRAIN_RQVAE=false
 RQ_EPOCHS="10000"
 RQ_EVAL_STEP="2000"
 RQ_DEVICE="cuda:0"
-ALPHA="0.01"
-BETA="0.0001"
+TOKENIZERS="letter"
+USER_ALPHA=""
+USER_BETA=""
 NUM_LAYERS="4"
 USER_NUM_EMB_LIST=""
 RESULTS_FILE=""
@@ -94,6 +97,7 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dataset) DATASET="$2"; shift 2 ;;
+    --tokenizer|--tokenizer-type|--tokenizers) TOKENIZERS="$2"; shift 2 ;;
     --data-root) DATA_ROOT="$2"; shift 2 ;;
     --embedding-file) EMBEDDING_FILE="$2"; shift 2 ;;
     --cf-embedding) CF_EMBEDDING="$2"; shift 2 ;;
@@ -102,8 +106,8 @@ while [[ $# -gt 0 ]]; do
     --rqvae-epochs) RQ_EPOCHS="$2"; shift 2 ;;
     --rqvae-eval-step) RQ_EVAL_STEP="$2"; shift 2 ;;
     --rqvae-device) RQ_DEVICE="$2"; shift 2 ;;
-    --alpha) ALPHA="$2"; shift 2 ;;
-    --beta) BETA="$2"; shift 2 ;;
+    --alpha) USER_ALPHA="$2"; shift 2 ;;
+    --beta) USER_BETA="$2"; shift 2 ;;
     --num-layers) NUM_LAYERS="$2"; shift 2 ;;
     --num-emb-list) USER_NUM_EMB_LIST="$2"; shift 2 ;;
     --index-name) INDEX_NAME="$2"; shift 2 ;;
@@ -146,6 +150,29 @@ if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   exit 1
 fi
 
+IFS=',' read -r -a RAW_TOKENIZERS <<< "$TOKENIZERS"
+NORMALIZED_TOKENIZERS=()
+for t in "${RAW_TOKENIZERS[@]}"; do
+  t="$(echo "$t" | tr -d ' ' | tr '[:upper:]' '[:lower:]')"
+  case "$t" in
+    letter)
+      NORMALIZED_TOKENIZERS+=(letter)
+      ;;
+    rqvae|rq-vae|vanilla|vanilla_rqvae|vanilla-rqvae)
+      NORMALIZED_TOKENIZERS+=(rqvae)
+      ;;
+    *)
+      printf 'Unknown tokenizer: %s (supported: letter, rqvae)\n' "$t" >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ "${#NORMALIZED_TOKENIZERS[@]}" -eq 0 ]]; then
+  printf 'Select at least one supported tokenizer: letter, rqvae\n' >&2
+  exit 2
+fi
+
 if [[ -n "$USER_NUM_EMB_LIST" ]]; then
   IFS=', ' read -r -a NUM_EMB_LIST <<< "$USER_NUM_EMB_LIST"
   NUM_LAYERS="${#NUM_EMB_LIST[@]}"
@@ -162,47 +189,6 @@ fi
 
 EMBEDDING_FILE="${EMBEDDING_FILE:-$DATA_ROOT/$DATASET/$DATASET.emb-flan-t5-xl-td.npy}"
 CF_EMBEDDING="${CF_EMBEDDING:-$REPO_ROOT/RQ-VAE/ckpt/$DATASET-32d-sasrec.pt}"
-if [[ -z "$INDEX_NAME" ]]; then
-  if [[ "$NUM_LAYERS" -eq 4 ]]; then
-    INDEX_NAME="$DATASET.index.fixed.json"
-  else
-    INDEX_NAME="$DATASET.index.fixed.L${NUM_LAYERS}.json"
-  fi
-fi
-INDEX_FILE="$DATA_ROOT/$DATASET/$INDEX_NAME"
-INDEX_SUFFIX="${INDEX_NAME#"$DATASET"}"
-RQ_CHECKPOINT_ROOT="$REPO_ROOT/checkpoint/$DATASET"
-
-if [[ "$NUM_LAYERS" -eq 4 ]]; then
-  TIGER_CKPT_DIR="./ckpt/$DATASET"
-  LCREC_CKPT_DIR="./ckpt/$DATASET"
-  TIGER_DEFAULT_RESULTS="./results/$DATASET/fixed.json"
-  LCREC_DEFAULT_RESULTS="./results/$DATASET/fixed.json"
-  LCREC_WANDB_NAME="${DATASET}-fixed"
-else
-  TIGER_CKPT_DIR="./ckpt/$DATASET-L${NUM_LAYERS}"
-  LCREC_CKPT_DIR="./ckpt/$DATASET-L${NUM_LAYERS}"
-  TIGER_DEFAULT_RESULTS="./results/$DATASET/fixed_L${NUM_LAYERS}.json"
-  LCREC_DEFAULT_RESULTS="./results/$DATASET/fixed_L${NUM_LAYERS}.json"
-  LCREC_WANDB_NAME="${DATASET}-fixed-L${NUM_LAYERS}"
-fi
-TIGER_RESULTS_FILE="${RESULTS_FILE:-$TIGER_DEFAULT_RESULTS}"
-LCREC_RESULTS_FILE="${RESULTS_FILE:-$LCREC_DEFAULT_RESULTS}"
-
-if [[ "$INDEX_SUFFIX" == "$INDEX_NAME" || "$INDEX_SUFFIX" != *.json ]]; then
-  printf 'Index name must start with %s and end with .json: %s\n' "$DATASET" "$INDEX_NAME" >&2
-  exit 2
-fi
-if [[ ! -f "$INDEX_FILE" || "$OVERWRITE_INDEX" == true || "$RETRAIN_RQVAE" == true ]]; then
-  if [[ ! -f "$EMBEDDING_FILE" ]]; then
-    printf 'Item embeddings not found: %s\nRun data_process/preprocess_item_embeddings.sh first.\n' "$EMBEDDING_FILE" >&2
-    exit 1
-  fi
-  if [[ ! -f "$CF_EMBEDDING" ]]; then
-    printf 'Collaborative-filtering embeddings not found: %s\n' "$CF_EMBEDDING" >&2
-    exit 1
-  fi
-fi
 
 contains_model() {
   [[ ",$MODELS," == *",$1,"* ]]
@@ -286,12 +272,128 @@ if valid:
 ' "$root" "$desired_layers" 2>/dev/null || true
 }
 
-if [[ -f "$INDEX_FILE" && "$OVERWRITE_INDEX" != true && "$RETRAIN_RQVAE" != true ]]; then
-  printf '\n[Index] Found existing fixed-length index: %s\n' "$INDEX_FILE"
-  printf '[Index] Reusing existing index (pass --overwrite-index to regenerate).\n'
-else
-  if [[ -n "$RQ_CHECKPOINT" && -f "$RQ_CHECKPOINT" ]]; then
-    CHECK_LAYERS=$("$PYTHON_BIN" -c '
+for TOK in "${NORMALIZED_TOKENIZERS[@]}"; do
+  if [[ "$TOK" == "letter" ]]; then
+    TOK_NAME="letter"
+    TOK_LABEL="LETTER"
+    TOK_ALPHA="${USER_ALPHA:-0.01}"
+    TOK_BETA="${USER_BETA:-0.0001}"
+    TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME"
+    TOK_SK_ARGS=()
+    TOK_NEEDS_CF=true
+
+    TOK_INDEX_DIR="$DATA_ROOT/$DATASET/$TOK_NAME"
+    if [[ "$NUM_LAYERS" -eq 4 ]]; then
+      DEFAULT_INDEX_NAME="$DATASET.index.fixed.json"
+      DEFAULT_TIGER_CKPT="./ckpt/$DATASET/$TOK_NAME"
+      DEFAULT_LCREC_CKPT="./ckpt/$DATASET/$TOK_NAME"
+      DEFAULT_TIGER_RESULTS="./results/$DATASET/$TOK_NAME/fixed.json"
+      DEFAULT_LCREC_RESULTS="./results/$DATASET/$TOK_NAME/fixed.json"
+      DEFAULT_LCREC_WANDB="${DATASET}-${TOK_NAME}-fixed"
+    else
+      DEFAULT_INDEX_NAME="$DATASET.index.fixed.L${NUM_LAYERS}.json"
+      DEFAULT_TIGER_CKPT="./ckpt/$DATASET/$TOK_NAME-L${NUM_LAYERS}"
+      DEFAULT_LCREC_CKPT="./ckpt/$DATASET/$TOK_NAME-L${NUM_LAYERS}"
+      DEFAULT_TIGER_RESULTS="./results/$DATASET/$TOK_NAME/fixed_L${NUM_LAYERS}.json"
+      DEFAULT_LCREC_RESULTS="./results/$DATASET/$TOK_NAME/fixed_L${NUM_LAYERS}.json"
+      DEFAULT_LCREC_WANDB="${DATASET}-${TOK_NAME}-fixed-L${NUM_LAYERS}"
+    fi
+  else
+    TOK_NAME="rqvae"
+    TOK_LABEL="Vanilla RQ-VAE"
+    TOK_ALPHA="${USER_ALPHA:-0.0}"
+    TOK_BETA="${USER_BETA:-0.0}"
+    TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME"
+    TOK_SK_ARGS=(--sk_epsilons)
+    for (( i=0; i<NUM_LAYERS; i++ )); do
+      TOK_SK_ARGS+=(0.0)
+    done
+    TOK_NEEDS_CF=false
+
+    TOK_INDEX_DIR="$DATA_ROOT/$DATASET/$TOK_NAME"
+    if [[ "$NUM_LAYERS" -eq 4 ]]; then
+      DEFAULT_INDEX_NAME="$DATASET.index.fixed.json"
+      DEFAULT_TIGER_CKPT="./ckpt/$DATASET/$TOK_NAME"
+      DEFAULT_LCREC_CKPT="./ckpt/$DATASET/$TOK_NAME"
+      DEFAULT_TIGER_RESULTS="./results/$DATASET/$TOK_NAME/fixed.json"
+      DEFAULT_LCREC_RESULTS="./results/$DATASET/$TOK_NAME/fixed.json"
+      DEFAULT_LCREC_WANDB="${DATASET}-${TOK_NAME}-fixed"
+    else
+      DEFAULT_INDEX_NAME="$DATASET.index.fixed.L${NUM_LAYERS}.json"
+      DEFAULT_TIGER_CKPT="./ckpt/$DATASET/$TOK_NAME-L${NUM_LAYERS}"
+      DEFAULT_LCREC_CKPT="./ckpt/$DATASET/$TOK_NAME-L${NUM_LAYERS}"
+      DEFAULT_TIGER_RESULTS="./results/$DATASET/$TOK_NAME/fixed_L${NUM_LAYERS}.json"
+      DEFAULT_LCREC_RESULTS="./results/$DATASET/$TOK_NAME/fixed_L${NUM_LAYERS}.json"
+      DEFAULT_LCREC_WANDB="${DATASET}-${TOK_NAME}-fixed-L${NUM_LAYERS}"
+    fi
+  fi
+
+  if [[ -n "$INDEX_NAME" ]]; then
+    if [[ "${#NORMALIZED_TOKENIZERS[@]}" -gt 1 ]]; then
+      BASE_NO_EXT="${INDEX_NAME%.json}"
+      CUR_INDEX_FILENAME="${BASE_NO_EXT}.${TOK_NAME}.json"
+    else
+      CUR_INDEX_FILENAME="$INDEX_NAME"
+    fi
+    if [[ "$CUR_INDEX_FILENAME" == /* ]]; then
+      CUR_INDEX_FILE="$CUR_INDEX_FILENAME"
+      CUR_INDEX_ARG="$CUR_INDEX_FILENAME"
+    elif [[ "$CUR_INDEX_FILENAME" == */* ]]; then
+      CUR_INDEX_FILE="$DATA_ROOT/$DATASET/$CUR_INDEX_FILENAME"
+      CUR_INDEX_ARG="$CUR_INDEX_FILENAME"
+    else
+      CUR_INDEX_FILE="$TOK_INDEX_DIR/$CUR_INDEX_FILENAME"
+      CUR_INDEX_ARG="$TOK_NAME/$CUR_INDEX_FILENAME"
+    fi
+  else
+    # Fall back to legacy index path in data/$DATASET/ if it already exists for letter
+    if [[ "$TOK" == "letter" && ! -f "$TOK_INDEX_DIR/$DEFAULT_INDEX_NAME" && -f "$DATA_ROOT/$DATASET/$DEFAULT_INDEX_NAME" && "$OVERWRITE_INDEX" != true ]]; then
+      CUR_INDEX_FILE="$DATA_ROOT/$DATASET/$DEFAULT_INDEX_NAME"
+      CUR_INDEX_ARG="$DEFAULT_INDEX_NAME"
+    else
+      CUR_INDEX_FILE="$TOK_INDEX_DIR/$DEFAULT_INDEX_NAME"
+      CUR_INDEX_ARG="$TOK_NAME/$DEFAULT_INDEX_NAME"
+    fi
+  fi
+
+  if [[ -n "$RESULTS_FILE" ]]; then
+    res_dir="$(dirname "$RESULTS_FILE")"
+    res_base="$(basename "$RESULTS_FILE")"
+    if [[ "$res_dir" == *"/$TOK_NAME" ]]; then
+      CUR_TIGER_RESULTS="$RESULTS_FILE"
+      CUR_LCREC_RESULTS="$RESULTS_FILE"
+    else
+      CUR_TIGER_RESULTS="$res_dir/$TOK_NAME/$res_base"
+      CUR_LCREC_RESULTS="$res_dir/$TOK_NAME/$res_base"
+    fi
+  else
+    CUR_TIGER_RESULTS="$DEFAULT_TIGER_RESULTS"
+    CUR_LCREC_RESULTS="$DEFAULT_LCREC_RESULTS"
+  fi
+
+  CUR_TIGER_CKPT="$DEFAULT_TIGER_CKPT"
+  CUR_LCREC_CKPT="$DEFAULT_LCREC_CKPT"
+  CUR_LCREC_WANDB="$DEFAULT_LCREC_WANDB"
+
+  if [[ ! -f "$CUR_INDEX_FILE" || "$OVERWRITE_INDEX" == true || "$RETRAIN_RQVAE" == true ]]; then
+    if [[ ! -f "$EMBEDDING_FILE" ]]; then
+      printf 'Item embeddings not found: %s\nRun data_process/preprocess_item_embeddings.sh first.\n' "$EMBEDDING_FILE" >&2
+      exit 1
+    fi
+    if [[ "$TOK_NEEDS_CF" == true && ! -f "$CF_EMBEDDING" ]]; then
+      printf 'Collaborative-filtering embeddings not found: %s\n' "$CF_EMBEDDING" >&2
+      exit 1
+    fi
+  fi
+
+  CUR_RQ_CHECKPOINT="$RQ_CHECKPOINT"
+
+  if [[ -f "$CUR_INDEX_FILE" && "$OVERWRITE_INDEX" != true && "$RETRAIN_RQVAE" != true ]]; then
+    printf '\n[Index] [%s] Found existing fixed-length index: %s\n' "$TOK_LABEL" "$CUR_INDEX_FILE"
+    printf '[Index] Reusing existing index (pass --overwrite-index to regenerate).\n'
+  else
+    if [[ -n "$CUR_RQ_CHECKPOINT" && -f "$CUR_RQ_CHECKPOINT" ]]; then
+      CHECK_LAYERS=$("$PYTHON_BIN" -c '
 import sys, torch
 try:
     ckpt = torch.load(sys.argv[1], map_location="cpu", weights_only=False)
@@ -300,214 +402,233 @@ except TypeError:
 args = ckpt.get("args")
 if args and hasattr(args, "num_emb_list"):
     print(len(args.num_emb_list))
-' "$RQ_CHECKPOINT" 2>/dev/null || true)
-    if [[ -n "$CHECK_LAYERS" && "$CHECK_LAYERS" -ne "$NUM_LAYERS" ]]; then
-      printf "Specified RQ-VAE checkpoint has %s layers, but requested --num-layers is %s.\n" "$CHECK_LAYERS" "$NUM_LAYERS" >&2
-      exit 1
+' "$CUR_RQ_CHECKPOINT" 2>/dev/null || true)
+      if [[ -n "$CHECK_LAYERS" && "$CHECK_LAYERS" -ne "$NUM_LAYERS" ]]; then
+        printf "Specified RQ-VAE checkpoint has %s layers, but requested --num-layers is %s.\n" "$CHECK_LAYERS" "$NUM_LAYERS" >&2
+        exit 1
+      fi
     fi
-  fi
 
-  DETECTED_CKPT=""
-  if [[ -z "$RQ_CHECKPOINT" && "$RETRAIN_RQVAE" != true ]]; then
-    DETECTED_CKPT="$(find_latest_checkpoint "$RQ_CHECKPOINT_ROOT" "$NUM_LAYERS")"
-    if [[ -n "$DETECTED_CKPT" && -f "$DETECTED_CKPT" ]]; then
-      RQ_CHECKPOINT="$DETECTED_CKPT"
-      printf '\n[RQ-VAE] Autodetected existing %s-layer checkpoint: %s\n' "$NUM_LAYERS" "$RQ_CHECKPOINT"
-      printf '[RQ-VAE] Reusing existing checkpoint (pass --retrain-rqvae to force training).\n'
+    DETECTED_CKPT=""
+    if [[ -z "$CUR_RQ_CHECKPOINT" && "$RETRAIN_RQVAE" != true ]]; then
+      DETECTED_CKPT="$(find_latest_checkpoint "$TOK_CKPT_ROOT" "$NUM_LAYERS")"
+      if [[ -z "$DETECTED_CKPT" && "$TOK" == "letter" ]]; then
+        LEGACY_CKPT="$(find_latest_checkpoint "$REPO_ROOT/checkpoint/$DATASET" "$NUM_LAYERS")"
+        if [[ -n "$LEGACY_CKPT" && "$LEGACY_CKPT" != *"/rqvae/"* ]]; then
+          DETECTED_CKPT="$LEGACY_CKPT"
+        fi
+      fi
+      if [[ -n "$DETECTED_CKPT" && -f "$DETECTED_CKPT" ]]; then
+        CUR_RQ_CHECKPOINT="$DETECTED_CKPT"
+        printf '\n[RQ-VAE] [%s] Autodetected existing %s-layer checkpoint: %s\n' "$TOK_LABEL" "$NUM_LAYERS" "$CUR_RQ_CHECKPOINT"
+        printf '[RQ-VAE] Reusing existing checkpoint (pass --retrain-rqvae to force training).\n'
+      fi
     fi
-  fi
 
-  if [[ -z "$RQ_CHECKPOINT" ]]; then
-    printf '\n[RQ-VAE] Training the tokenizer with %s layers...\n' "$NUM_LAYERS"
-    STEP_START="$SECONDS"
-    mkdir -p "$RQ_CHECKPOINT_ROOT"
-    "$PYTHON_BIN" "$REPO_ROOT/RQ-VAE/main.py" \
-      --device "$RQ_DEVICE" \
-      --data_path "$EMBEDDING_FILE" \
-      --cf_emb "$CF_EMBEDDING" \
-      --alpha "$ALPHA" \
-      --beta "$BETA" \
-      --epochs "$RQ_EPOCHS" \
-      --eval_step "$RQ_EVAL_STEP" \
-      --ckpt_dir "$RQ_CHECKPOINT_ROOT" \
-      --num_emb_list "${NUM_EMB_LIST[@]}"
+    if [[ -z "$CUR_RQ_CHECKPOINT" ]]; then
+      printf '\n[RQ-VAE] [%s] Training tokenizer with %s layers...\n' "$TOK_LABEL" "$NUM_LAYERS"
+      STEP_START="$SECONDS"
+      mkdir -p "$TOK_CKPT_ROOT"
+      rq_train_cmd=(
+        "$PYTHON_BIN" "$REPO_ROOT/RQ-VAE/main.py"
+        --device "$RQ_DEVICE"
+        --data_path "$EMBEDDING_FILE"
+        --alpha "$TOK_ALPHA"
+        --beta "$TOK_BETA"
+        --epochs "$RQ_EPOCHS"
+        --eval_step "$RQ_EVAL_STEP"
+        --ckpt_dir "$TOK_CKPT_ROOT"
+        --num_emb_list "${NUM_EMB_LIST[@]}"
+      )
+      if [[ "$TOK_NEEDS_CF" == true && -n "$CF_EMBEDDING" ]]; then
+        rq_train_cmd+=(--cf_emb "$CF_EMBEDDING")
+      fi
+      if [[ "${#TOK_SK_ARGS[@]}" -gt 0 ]]; then
+        rq_train_cmd+=("${TOK_SK_ARGS[@]}")
+      fi
 
-    RQ_CHECKPOINT="$(find_latest_checkpoint "$RQ_CHECKPOINT_ROOT" "$NUM_LAYERS")"
-    if [[ -z "$RQ_CHECKPOINT" ]]; then
-      printf 'RQ-VAE training completed without a best_collision_model.pth checkpoint.\n' >&2
-      exit 1
-    fi
-    printf 'Completed RQ-VAE training in %s.\n' "$(format_duration "$((SECONDS - STEP_START))")"
-    record_phase "RQ-VAE training" "$((SECONDS - STEP_START))"
-    printf 'Stored RQ-VAE checkpoint: %s\n' "$RQ_CHECKPOINT"
-  else
-    if [[ "$DETECTED_CKPT" != "$RQ_CHECKPOINT" ]]; then
-      printf '\n[RQ-VAE] Reusing checkpoint: %s\n' "$RQ_CHECKPOINT"
-    fi
-  fi
-  if [[ ! -f "$RQ_CHECKPOINT" ]]; then
-    printf 'RQ-VAE checkpoint not found: %s\n' "$RQ_CHECKPOINT" >&2
-    exit 1
-  fi
+      "${rq_train_cmd[@]}"
 
-  printf '\n[Index] Generating the fixed-length item index...\n'
-  STEP_START="$SECONDS"
-  "$PYTHON_BIN" "$REPO_ROOT/RQ-VAE/generate_indices.py" \
-    --dataset "$DATASET" \
-    --checkpoint-path "$RQ_CHECKPOINT" \
-    --output-file "$INDEX_FILE" \
-    --device "$RQ_DEVICE"
-
-  if [[ ! -f "$INDEX_FILE" ]]; then
-    printf 'Index generation completed without creating: %s\n' "$INDEX_FILE" >&2
-    exit 1
-  fi
-  printf 'Completed fixed-index generation in %s.\n' "$(format_duration "$((SECONDS - STEP_START))")"
-  record_phase "Fixed-length index generation" "$((SECONDS - STEP_START))"
-  printf 'Stored fixed-length item index: %s\n' "$INDEX_FILE"
-fi
-
-if [[ "$TOKENIZER_ONLY" == true ]]; then
-  print_phase_durations
-  printf '\nTokenizer and fixed-index pipeline completed in %s.\n' \
-    "$(format_duration "$((SECONDS - PIPELINE_START))")"
-  exit 0
-fi
-
-if contains_model tiger; then
-  printf '\n[TIGER] Training...\n'
-  STEP_START="$SECONDS"
-  mkdir -p "$(dirname "$TIGER_RESULTS_FILE")"
-  (
-    cd "$REPO_ROOT/LETTER-TIGER"
-    TIGER_COUNT="$(gpu_count "$TIGER_GPUS")"
-    if [[ "$TIGER_COUNT" -le 1 ]]; then
-      printf '[TIGER] Single GPU mode (%s) - running directly without DDP.\n' "$TIGER_GPUS"
-      CUDA_VISIBLE_DEVICES="$TIGER_GPUS" "$PYTHON_BIN" finetune.py \
-        --output_dir "$TIGER_CKPT_DIR" \
-        --dataset "$DATASET" \
-        --data_path "$DATA_ROOT" \
-        --per_device_batch_size 256 \
-        --learning_rate 5e-4 \
-        --epochs 200 \
-        --index_file "$INDEX_SUFFIX" \
-        --temperature 1.0
+      CUR_RQ_CHECKPOINT="$(find_latest_checkpoint "$TOK_CKPT_ROOT" "$NUM_LAYERS")"
+      if [[ -z "$CUR_RQ_CHECKPOINT" ]]; then
+        printf 'RQ-VAE training completed without a best_collision_model.pth checkpoint.\n' >&2
+        exit 1
+      fi
+      printf 'Completed %s training in %s.\n' "$TOK_LABEL" "$(format_duration "$((SECONDS - STEP_START))")"
+      record_phase "[$TOK_LABEL] Tokenizer training" "$((SECONDS - STEP_START))"
+      printf 'Stored %s checkpoint: %s\n' "$TOK_LABEL" "$CUR_RQ_CHECKPOINT"
     else
-      TIGER_PORT="$(find_free_port 2314)"
-      CUDA_VISIBLE_DEVICES="$TIGER_GPUS" torchrun \
-        --nproc_per_node="$TIGER_COUNT" \
-        --master_port="$TIGER_PORT" \
-        finetune.py \
-        --output_dir "$TIGER_CKPT_DIR" \
-        --dataset "$DATASET" \
-        --data_path "$DATA_ROOT" \
-        --per_device_batch_size 256 \
-        --learning_rate 5e-4 \
-        --epochs 200 \
-        --index_file "$INDEX_SUFFIX" \
-        --temperature 1.0
+      if [[ "$DETECTED_CKPT" != "$CUR_RQ_CHECKPOINT" ]]; then
+        printf '\n[RQ-VAE] [%s] Reusing checkpoint: %s\n' "$TOK_LABEL" "$CUR_RQ_CHECKPOINT"
+      fi
     fi
-  )
-  printf 'Completed LETTER-TIGER training in %s.\n' "$(format_duration "$((SECONDS - STEP_START))")"
-  record_phase "LETTER-TIGER training" "$((SECONDS - STEP_START))"
-  printf 'Stored LETTER-TIGER checkpoint: %s\n' "$TIGER_CKPT_DIR"
+    if [[ ! -f "$CUR_RQ_CHECKPOINT" ]]; then
+      printf '%s checkpoint not found: %s\n' "$TOK_LABEL" "$CUR_RQ_CHECKPOINT" >&2
+      exit 1
+    fi
 
-  if [[ "$SKIP_EVALUATION" != true ]]; then
-    printf '\n[TIGER] Evaluating...\n'
+    printf '\n[Index] [%s] Generating fixed-length item index...\n' "$TOK_LABEL"
     STEP_START="$SECONDS"
+    mkdir -p "$(dirname "$CUR_INDEX_FILE")"
+    "$PYTHON_BIN" "$REPO_ROOT/RQ-VAE/generate_indices.py" \
+      --dataset "$DATASET" \
+      --checkpoint-path "$CUR_RQ_CHECKPOINT" \
+      --output-file "$CUR_INDEX_FILE" \
+      --device "$RQ_DEVICE"
+
+    if [[ ! -f "$CUR_INDEX_FILE" ]]; then
+      printf 'Index generation completed without creating: %s\n' "$CUR_INDEX_FILE" >&2
+      exit 1
+    fi
+    printf 'Completed %s index generation in %s.\n' "$TOK_LABEL" "$(format_duration "$((SECONDS - STEP_START))")"
+    record_phase "[$TOK_LABEL] Index generation" "$((SECONDS - STEP_START))"
+    printf 'Stored fixed-length item index: %s\n' "$CUR_INDEX_FILE"
+  fi
+
+  if [[ "$TOKENIZER_ONLY" == true ]]; then
+    continue
+  fi
+
+  if contains_model tiger; then
+    printf '\n[TIGER] [%s] Training...\n' "$TOK_LABEL"
+    STEP_START="$SECONDS"
+    mkdir -p "$(dirname "$CUR_TIGER_RESULTS")"
     (
       cd "$REPO_ROOT/LETTER-TIGER"
-      "$PYTHON_BIN" test.py \
-        --gpu_id 0 \
-        --ckpt_path "$TIGER_CKPT_DIR" \
-        --dataset "$DATASET" \
-        --data_path "$DATA_ROOT" \
-        --results_file "$TIGER_RESULTS_FILE" \
-        --test_batch_size 32 \
-        --num_beams 20 \
-        --test_prompt_ids 0 \
-        --index_file "$INDEX_SUFFIX"
+      TIGER_COUNT="$(gpu_count "$TIGER_GPUS")"
+      if [[ "$TIGER_COUNT" -le 1 ]]; then
+        printf '[TIGER] Single GPU mode (%s) - running directly without DDP.\n' "$TIGER_GPUS"
+        CUDA_VISIBLE_DEVICES="$TIGER_GPUS" "$PYTHON_BIN" finetune.py \
+          --output_dir "$CUR_TIGER_CKPT" \
+          --dataset "$DATASET" \
+          --data_path "$DATA_ROOT" \
+          --per_device_batch_size 256 \
+          --learning_rate 5e-4 \
+          --epochs 200 \
+          --index_file "$CUR_INDEX_ARG" \
+          --temperature 1.0
+      else
+        TIGER_PORT="$(find_free_port 2314)"
+        CUDA_VISIBLE_DEVICES="$TIGER_GPUS" torchrun \
+          --nproc_per_node="$TIGER_COUNT" \
+          --master_port="$TIGER_PORT" \
+          finetune.py \
+          --output_dir "$CUR_TIGER_CKPT" \
+          --dataset "$DATASET" \
+          --data_path "$DATA_ROOT" \
+          --per_device_batch_size 256 \
+          --learning_rate 5e-4 \
+          --epochs 200 \
+          --index_file "$CUR_INDEX_ARG" \
+          --temperature 1.0
+      fi
     )
-    printf 'Completed LETTER-TIGER evaluation in %s.\n' "$(format_duration "$((SECONDS - STEP_START))")"
-    record_phase "LETTER-TIGER evaluation" "$((SECONDS - STEP_START))"
-    printf 'Stored LETTER-TIGER metrics: %s\n' "$TIGER_RESULTS_FILE"
-  fi
-fi
+    printf 'Completed [%s] LETTER-TIGER training in %s.\n' "$TOK_LABEL" "$(format_duration "$((SECONDS - STEP_START))")"
+    record_phase "[$TOK_LABEL] LETTER-TIGER training" "$((SECONDS - STEP_START))"
+    printf 'Stored LETTER-TIGER checkpoint: %s\n' "$CUR_TIGER_CKPT"
 
-if contains_model lcrec; then
-  printf '\n[LC-Rec] Training...\n'
-  STEP_START="$SECONDS"
-  mkdir -p "$(dirname "$LCREC_RESULTS_FILE")"
-  (
-    cd "$REPO_ROOT/LETTER-LC-Rec"
-    LCREC_COUNT="$(gpu_count "$LCREC_GPUS")"
-    if [[ "$LCREC_COUNT" -le 1 ]]; then
-      printf '[LC-Rec] Single GPU mode (%s) - skipping DDP for 8-bit quantized training.\n' "$LCREC_GPUS"
-      CUDA_VISIBLE_DEVICES="$LCREC_GPUS" "$PYTHON_BIN" lora_finetune.py \
-        --base_model "$BASE_MODEL" \
-        --output_dir "$LCREC_CKPT_DIR" \
-        --dataset "$DATASET" \
-        --data_path "$DATA_ROOT" \
-        --per_device_batch_size 16 \
-        --learning_rate 1e-4 \
-        --epochs 4 \
-        --tasks seqrec \
-        --train_prompt_sample_num 1 \
-        --train_data_sample_num 0 \
-        --index_file "$INDEX_SUFFIX" \
-        --wandb_run_name "$LCREC_WANDB_NAME" \
-        --temperature 1.0
-    else
-      LCREC_PORT="$(find_free_port 3325)"
-      CUDA_VISIBLE_DEVICES="$LCREC_GPUS" torchrun \
-        --nproc_per_node="$LCREC_COUNT" \
-        --master_port="$LCREC_PORT" \
-        lora_finetune.py \
-        --base_model "$BASE_MODEL" \
-        --output_dir "$LCREC_CKPT_DIR" \
-        --dataset "$DATASET" \
-        --data_path "$DATA_ROOT" \
-        --per_device_batch_size 16 \
-        --learning_rate 1e-4 \
-        --epochs 4 \
-        --tasks seqrec \
-        --train_prompt_sample_num 1 \
-        --train_data_sample_num 0 \
-        --index_file "$INDEX_SUFFIX" \
-        --wandb_run_name "$LCREC_WANDB_NAME" \
-        --temperature 1.0
+    if [[ "$SKIP_EVALUATION" != true ]]; then
+      printf '\n[TIGER] [%s] Evaluating...\n' "$TOK_LABEL"
+      STEP_START="$SECONDS"
+      (
+        cd "$REPO_ROOT/LETTER-TIGER"
+        "$PYTHON_BIN" test.py \
+          --gpu_id 0 \
+          --ckpt_path "$CUR_TIGER_CKPT" \
+          --dataset "$DATASET" \
+          --data_path "$DATA_ROOT" \
+          --results_file "$CUR_TIGER_RESULTS" \
+          --test_batch_size 32 \
+          --num_beams 20 \
+          --test_prompt_ids 0 \
+          --index_file "$CUR_INDEX_ARG"
+      )
+      printf 'Completed [%s] LETTER-TIGER evaluation in %s.\n' "$TOK_LABEL" "$(format_duration "$((SECONDS - STEP_START))")"
+      record_phase "[$TOK_LABEL] LETTER-TIGER evaluation" "$((SECONDS - STEP_START))"
+      printf 'Stored LETTER-TIGER metrics: %s\n' "$CUR_TIGER_RESULTS"
     fi
-  )
-  printf 'Completed LETTER-LC-Rec training in %s.\n' "$(format_duration "$((SECONDS - STEP_START))")"
-  record_phase "LETTER-LC-Rec training" "$((SECONDS - STEP_START))"
-  printf 'Stored LETTER-LC-Rec checkpoint: %s\n' "$LCREC_CKPT_DIR"
+  fi
 
-  if [[ "$SKIP_EVALUATION" != true ]]; then
-    printf '\n[LC-Rec] Evaluating...\n'
+  if contains_model lcrec; then
+    printf '\n[LC-Rec] [%s] Training...\n' "$TOK_LABEL"
     STEP_START="$SECONDS"
+    mkdir -p "$(dirname "$CUR_LCREC_RESULTS")"
     (
       cd "$REPO_ROOT/LETTER-LC-Rec"
-      TEST_PORT="$(find_free_port 4324)"
-      CUDA_VISIBLE_DEVICES="$LCREC_GPUS" torchrun \
-        --nproc_per_node="$(gpu_count "$LCREC_GPUS")" \
-        --master_port="$TEST_PORT" \
-        test_ddp.py \
-        --ckpt_path "$LCREC_CKPT_DIR" \
-        --base_model "$BASE_MODEL" \
-        --dataset "$DATASET" \
-        --data_path "$DATA_ROOT" \
-        --results_file "$LCREC_RESULTS_FILE" \
-        --test_batch_size 1 \
-        --num_beams 20 \
-        --test_prompt_ids 0 \
-        --index_file "$INDEX_SUFFIX"
+      LCREC_COUNT="$(gpu_count "$LCREC_GPUS")"
+      if [[ "$LCREC_COUNT" -le 1 ]]; then
+        printf '[LC-Rec] Single GPU mode (%s) - skipping DDP for 8-bit quantized training.\n' "$LCREC_GPUS"
+        CUDA_VISIBLE_DEVICES="$LCREC_GPUS" "$PYTHON_BIN" lora_finetune.py \
+          --base_model "$BASE_MODEL" \
+          --output_dir "$CUR_LCREC_CKPT" \
+          --dataset "$DATASET" \
+          --data_path "$DATA_ROOT" \
+          --per_device_batch_size 16 \
+          --learning_rate 1e-4 \
+          --epochs 4 \
+          --tasks seqrec \
+          --train_prompt_sample_num 1 \
+          --train_data_sample_num 0 \
+          --index_file "$CUR_INDEX_ARG" \
+          --wandb_run_name "$CUR_LCREC_WANDB" \
+          --temperature 1.0
+      else
+        LCREC_PORT="$(find_free_port 3325)"
+        CUDA_VISIBLE_DEVICES="$LCREC_GPUS" torchrun \
+          --nproc_per_node="$LCREC_COUNT" \
+          --master_port="$LCREC_PORT" \
+          lora_finetune.py \
+          --base_model "$BASE_MODEL" \
+          --output_dir "$CUR_LCREC_CKPT" \
+          --dataset "$DATASET" \
+          --data_path "$DATA_ROOT" \
+          --per_device_batch_size 16 \
+          --learning_rate 1e-4 \
+          --epochs 4 \
+          --tasks seqrec \
+          --train_prompt_sample_num 1 \
+          --train_data_sample_num 0 \
+          --index_file "$CUR_INDEX_ARG" \
+          --wandb_run_name "$CUR_LCREC_WANDB" \
+          --temperature 1.0
+      fi
     )
-    printf 'Completed LETTER-LC-Rec evaluation in %s.\n' "$(format_duration "$((SECONDS - STEP_START))")"
-    record_phase "LETTER-LC-Rec evaluation" "$((SECONDS - STEP_START))"
-    printf 'Stored LETTER-LC-Rec metrics: %s\n' "$LCREC_RESULTS_FILE"
+    printf 'Completed [%s] LETTER-LC-Rec training in %s.\n' "$TOK_LABEL" "$(format_duration "$((SECONDS - STEP_START))")"
+    record_phase "[$TOK_LABEL] LETTER-LC-Rec training" "$((SECONDS - STEP_START))"
+    printf 'Stored LETTER-LC-Rec checkpoint: %s\n' "$CUR_LCREC_CKPT"
+
+    if [[ "$SKIP_EVALUATION" != true ]]; then
+      printf '\n[LC-Rec] [%s] Evaluating...\n' "$TOK_LABEL"
+      STEP_START="$SECONDS"
+      (
+        cd "$REPO_ROOT/LETTER-LC-Rec"
+        TEST_PORT="$(find_free_port 4324)"
+        CUDA_VISIBLE_DEVICES="$LCREC_GPUS" torchrun \
+          --nproc_per_node="$(gpu_count "$LCREC_GPUS")" \
+          --master_port="$TEST_PORT" \
+          test_ddp.py \
+          --ckpt_path "$CUR_LCREC_CKPT" \
+          --base_model "$BASE_MODEL" \
+          --dataset "$DATASET" \
+          --data_path "$DATA_ROOT" \
+          --results_file "$CUR_LCREC_RESULTS" \
+          --test_batch_size 1 \
+          --num_beams 20 \
+          --test_prompt_ids 0 \
+          --index_file "$CUR_INDEX_ARG"
+      )
+      printf 'Completed [%s] LETTER-LC-Rec evaluation in %s.\n' "$TOK_LABEL" "$(format_duration "$((SECONDS - STEP_START))")"
+      record_phase "[$TOK_LABEL] LETTER-LC-Rec evaluation" "$((SECONDS - STEP_START))"
+      printf 'Stored LETTER-LC-Rec metrics: %s\n' "$CUR_LCREC_RESULTS"
+    fi
   fi
-fi
+done
 
 print_phase_durations
-printf '\nFixed-length pipeline completed in %s.\n' \
-  "$(format_duration "$((SECONDS - PIPELINE_START))")"
+if [[ "$TOKENIZER_ONLY" == true ]]; then
+  printf '\nTokenizer and fixed-index pipeline completed in %s.\n' \
+    "$(format_duration "$((SECONDS - PIPELINE_START))")"
+else
+  printf '\nFixed-length pipeline completed in %s.\n' \
+    "$(format_duration "$((SECONDS - PIPELINE_START))")"
+fi
