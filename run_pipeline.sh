@@ -252,11 +252,7 @@ elif [[ -n "$USER_NUM_LAYERS" ]]; then
     NUM_EMB_LIST+=(256)
   done
 else
-  if [[ "$MODE" == "varlen" ]]; then
-    NUM_LAYERS="$MAX_LENGTH"
-  else
-    NUM_LAYERS="4"
-  fi
+  NUM_LAYERS="$MAX_LENGTH"
   NUM_EMB_LIST=()
   for (( i=0; i<NUM_LAYERS; i++ )); do
     NUM_EMB_LIST+=(256)
@@ -487,12 +483,6 @@ if args and hasattr(args, "num_emb_list"):
   local detected_ckpt=""
   if [[ "$RETRAIN_RQVAE" != true ]]; then
     detected_ckpt="$(find_latest_checkpoint "$TOK_CKPT_ROOT" "$NUM_LAYERS")"
-    if [[ -z "$detected_ckpt" && "$TOKENIZER" == "letter" ]]; then
-      local legacy_ckpt="$(find_latest_checkpoint "$REPO_ROOT/checkpoint/$DATASET" "$NUM_LAYERS")"
-      if [[ -n "$legacy_ckpt" && "$legacy_ckpt" != *"/rqvae/"* ]]; then
-        detected_ckpt="$legacy_ckpt"
-      fi
-    fi
     if [[ -n "$detected_ckpt" && -f "$detected_ckpt" ]]; then
       CUR_RQ_CHECKPOINT="$detected_ckpt"
       printf '\n[RQ-VAE] [%s] Autodetected existing %s-layer checkpoint: %s\n' "$TOK_LABEL" "$NUM_LAYERS" "$CUR_RQ_CHECKPOINT"
@@ -587,22 +577,13 @@ if [[ "$MODE" == "fixed" ]]; then
     if [[ "$INDEX_NAME" == /* ]]; then
       TARGET_INDEX_FILE="$INDEX_NAME"
       TARGET_INDEX_ARG="$INDEX_NAME"
-    elif [[ "$INDEX_NAME" == */* ]]; then
-      TARGET_INDEX_FILE="$DATA_ROOT/$DATASET/$INDEX_NAME"
-      TARGET_INDEX_ARG="$INDEX_NAME"
     else
       TARGET_INDEX_FILE="$TOK_INDEX_DIR/$INDEX_NAME"
       TARGET_INDEX_ARG="$TOK_NAME/$INDEX_NAME"
     fi
   else
-    # Legacy fallback in data/$DATASET/ if exists for letter
-    if [[ "$TOKENIZER" == "letter" && ! -f "$TOK_INDEX_DIR/$DEF_NAME" && -f "$DATA_ROOT/$DATASET/$DEF_NAME" && "$OVERWRITE_INDEX" != true ]]; then
-      TARGET_INDEX_FILE="$DATA_ROOT/$DATASET/$DEF_NAME"
-      TARGET_INDEX_ARG="$DEF_NAME"
-    else
-      TARGET_INDEX_FILE="$TOK_INDEX_DIR/$DEF_NAME"
-      TARGET_INDEX_ARG="$TOK_NAME/$DEF_NAME"
-    fi
+    TARGET_INDEX_FILE="$TOK_INDEX_DIR/$DEF_NAME"
+    TARGET_INDEX_ARG="$TOK_NAME/$DEF_NAME"
   fi
 
   if [[ -f "$TARGET_INDEX_FILE" && "$OVERWRITE_INDEX" != true && "$RETRAIN_RQVAE" != true ]]; then
@@ -633,49 +614,35 @@ else
   REGEN_INTERMEDIATE=false
 
   if [[ -n "$FIXED_INDEX_PARAM" ]]; then
-    if [[ "$FIXED_INDEX_PARAM" != /* ]]; then
-      if [[ -f "$CALLER_DIR/$FIXED_INDEX_PARAM" ]]; then
-        FIXED_INDEX_PARAM="$CALLER_DIR/$FIXED_INDEX_PARAM"
-      elif [[ -f "$TOK_INDEX_DIR/$FIXED_INDEX_PARAM" ]]; then
-        FIXED_INDEX_PARAM="$TOK_INDEX_DIR/$FIXED_INDEX_PARAM"
-      elif [[ -f "$DATA_ROOT/$DATASET/$FIXED_INDEX_PARAM" ]]; then
-        FIXED_INDEX_PARAM="$DATA_ROOT/$DATASET/$FIXED_INDEX_PARAM"
-      else
-        FIXED_INDEX_PARAM="$CALLER_DIR/$FIXED_INDEX_PARAM"
-      fi
+    if [[ "$FIXED_INDEX_PARAM" == /* ]]; then
+      INTERMEDIATE_FIXED_FILE="$FIXED_INDEX_PARAM"
+    elif [[ -f "$CALLER_DIR/$FIXED_INDEX_PARAM" ]]; then
+      INTERMEDIATE_FIXED_FILE="$CALLER_DIR/$FIXED_INDEX_PARAM"
+    elif [[ -f "$TOK_INDEX_DIR/$FIXED_INDEX_PARAM" ]]; then
+      INTERMEDIATE_FIXED_FILE="$TOK_INDEX_DIR/$FIXED_INDEX_PARAM"
+    else
+      INTERMEDIATE_FIXED_FILE="$TOK_INDEX_DIR/$FIXED_INDEX_PARAM"
     fi
-    INTERMEDIATE_FIXED_FILE="$FIXED_INDEX_PARAM"
     if [[ ! -f "$INTERMEDIATE_FIXED_FILE" ]]; then
       printf 'Specified --fixed-index not found: %s\n' "$INTERMEDIATE_FIXED_FILE" >&2
       exit 1
     fi
   else
-    # Autodetect intermediate index in tokenizer dir or legacy dataset root
+    # Autodetect intermediate index in tokenizer directory
     if [[ "$NUM_LAYERS" -eq 4 ]]; then
       cand1="$TOK_INDEX_DIR/$DATASET.index.fixed.json"
       cand2="$TOK_INDEX_DIR/$DATASET.index.fixed-for-varlen.json"
-      cand3="$DATA_ROOT/$DATASET/$DATASET.index.fixed.json"
-      cand4="$DATA_ROOT/$DATASET/$DATASET.index.json"
     else
       cand1="$TOK_INDEX_DIR/$DATASET.index.fixed.L${NUM_LAYERS}.json"
       cand2="$TOK_INDEX_DIR/$DATASET.index.fixed-for-varlen.L${NUM_LAYERS}.json"
-      cand3="$DATA_ROOT/$DATASET/$DATASET.index.fixed.L${NUM_LAYERS}.json"
-      cand4=""
     fi
 
-    for c in "$cand1" "$cand2" "$cand3" "$cand4"; do
-      if [[ -n "$c" && -f "$c" ]]; then
-        INTERMEDIATE_FIXED_FILE="$c"
-        break
-      fi
-    done
-
-    if [[ -z "$INTERMEDIATE_FIXED_FILE" ]]; then
-      if [[ "$NUM_LAYERS" -eq 4 ]]; then
-        INTERMEDIATE_FIXED_FILE="$TOK_INDEX_DIR/$DATASET.index.fixed-for-varlen.json"
-      else
-        INTERMEDIATE_FIXED_FILE="$TOK_INDEX_DIR/$DATASET.index.fixed-for-varlen.L${NUM_LAYERS}.json"
-      fi
+    if [[ -f "$cand1" ]]; then
+      INTERMEDIATE_FIXED_FILE="$cand1"
+    elif [[ -f "$cand2" ]]; then
+      INTERMEDIATE_FIXED_FILE="$cand2"
+    else
+      INTERMEDIATE_FIXED_FILE="$cand2"
       REGEN_INTERMEDIATE=true
     fi
   fi
@@ -734,9 +701,6 @@ except Exception:
   if [[ -n "$INDEX_NAME" ]]; then
     if [[ "$INDEX_NAME" == /* ]]; then
       TARGET_INDEX_FILE="$INDEX_NAME"
-      TARGET_INDEX_ARG="$INDEX_NAME"
-    elif [[ "$INDEX_NAME" == */* ]]; then
-      TARGET_INDEX_FILE="$DATA_ROOT/$DATASET/$INDEX_NAME"
       TARGET_INDEX_ARG="$INDEX_NAME"
     else
       TARGET_INDEX_FILE="$TOK_INDEX_DIR/$INDEX_NAME"
