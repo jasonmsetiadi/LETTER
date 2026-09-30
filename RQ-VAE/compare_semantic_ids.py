@@ -170,6 +170,7 @@ def parse_args():
 
 def evaluate_semantic_ids(
     dataset="Instruments",
+    tokenizer="rqvae",
     repo_root=None,
     data_root=None,
     index_file=None,
@@ -197,21 +198,41 @@ def evaluate_semantic_ids(
     repo_root = Path(repo_root) if repo_root else Path(__file__).resolve().parent.parent
     data_root = Path(data_root) if data_root else repo_root / "data"
     dataset_dir = data_root / dataset
+    tok_dir = dataset_dir / tokenizer if tokenizer else dataset_dir
 
     if index_file is None:
+        cand_list = []
+        if tokenizer and (dataset_dir / tokenizer).is_dir():
+            if max_length != 4:
+                cand_list.extend([
+                    tok_dir / f"{dataset}.index.fixed-for-varlen.L{max_length}.json",
+                    tok_dir / f"{dataset}.index.fixed.L{max_length}.json",
+                    tok_dir / f"{dataset}.index.fixed.json",
+                    tok_dir / f"{dataset}.index.fixed-for-varlen.json",
+                    tok_dir / f"{dataset}.index.json",
+                ])
+            else:
+                cand_list.extend([
+                    tok_dir / f"{dataset}.index.fixed.json",
+                    tok_dir / f"{dataset}.index.json",
+                    tok_dir / f"{dataset}.index.fixed-for-varlen.json",
+                ])
+
         if max_length != 4:
-            cand_list = [
+            cand_list.extend([
                 dataset_dir / f"{dataset}.index.fixed-for-varlen.L{max_length}.json",
                 dataset_dir / f"{dataset}.index.fixed.L{max_length}.json",
                 dataset_dir / f"{dataset}.index.fixed.json",
                 dataset_dir / f"{dataset}.index.fixed-for-varlen.json",
                 dataset_dir / f"{dataset}.index.json",
-            ]
-            index_file = next((c for c in cand_list if c.exists()), cand_list[-1])
+            ])
         else:
-            index_file = dataset_dir / f"{dataset}.index.json"
-            if not index_file.exists():
-                index_file = dataset_dir / f"{dataset}.index.fixed-for-varlen.json"
+            cand_list.extend([
+                dataset_dir / f"{dataset}.index.json",
+                dataset_dir / f"{dataset}.index.fixed-for-varlen.json",
+                dataset_dir / f"{dataset}.index.fixed.json",
+            ])
+        index_file = next((c for c in cand_list if c.exists()), cand_list[-1])
     index_file = Path(index_file)
     if not index_file.exists():
         raise FileNotFoundError(f"Index file not found: {index_file}")

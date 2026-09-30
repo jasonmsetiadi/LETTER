@@ -41,6 +41,12 @@ def parse_args():
         help="Comma-separated list of models (e.g. tiger,lcrec).",
     )
     parser.add_argument(
+        "--tokenizer",
+        type=str,
+        default="rqvae",
+        help="Tokenizer type: rqvae or letter (default: rqvae).",
+    )
+    parser.add_argument(
         "--no-merge",
         action="store_true",
         help="Do not merge with existing strategy_comparison.json or auto-discover existing result files.",
@@ -137,12 +143,18 @@ def main():
     raw_models = args.models.replace(",", " ").split()
     models = [m.strip().lower() for m in raw_models if m.strip()]
 
+    tokenizer = (args.tokenizer or "rqvae").strip().lower()
     tag = "" if (max_length == 4 and min_length == 1) else (f"_max{max_length}" if min_length == 1 else f"_min{min_length}-max{max_length}")
 
     for model in models:
         model_name = "LETTER-TIGER" if model == "tiger" else "LETTER-LC-Rec"
         model_dir = "LETTER-TIGER" if model == "tiger" else "LETTER-LC-Rec"
-        report_dir = os.path.join(repo_root, model_dir, "results", dataset)
+        tok_report_dir = os.path.join(repo_root, model_dir, "results", dataset, tokenizer)
+        legacy_report_dir = os.path.join(repo_root, model_dir, "results", dataset)
+        if os.path.isdir(tok_report_dir) or tokenizer != "letter":
+            report_dir = tok_report_dir
+        else:
+            report_dir = legacy_report_dir
         os.makedirs(report_dir, exist_ok=True)
         report_json = os.path.join(report_dir, f"strategy_comparison{tag}.json")
 
@@ -212,6 +224,7 @@ def main():
         try:
             sid_eval = evaluate_semantic_ids(
                 dataset=dataset,
+                tokenizer=tokenizer,
                 repo_root=repo_root,
                 data_root=data_root,
                 min_length=min_length,
@@ -235,9 +248,17 @@ def main():
             res_file = None
             if strat == "fixed":
                 res_fname = "fixed.json" if max_length == 4 else f"fixed_L{max_length}.json"
-                res_file = os.path.join(repo_root, model_dir, "results", dataset, res_fname)
+                cand_res = [
+                    os.path.join(report_dir, res_fname),
+                    os.path.join(legacy_report_dir, res_fname),
+                ]
+                res_file = next((c for c in cand_res if os.path.isfile(c)), cand_res[0])
             elif strat == "shortest_unique":
-                res_file = os.path.join(repo_root, model_dir, "results", dataset, f"varlen{tag}.json")
+                cand_res = [
+                    os.path.join(report_dir, f"varlen{tag}.json"),
+                    os.path.join(legacy_report_dir, f"varlen{tag}.json"),
+                ]
+                res_file = next((c for c in cand_res if os.path.isfile(c)), cand_res[0])
             elif (
                 strat == "popularity"
                 or strat.startswith("popularity:")
@@ -265,14 +286,18 @@ def main():
                 }
                 _, res_tag = sig_map.get(sig, (f"pop-{sig}", f"-pop-{sig}"))
                 full_res_tag = res_tag if not tag else f"{res_tag}{tag}"
-                res_file = os.path.join(
-                    repo_root, model_dir, "results", dataset, f"varlen{full_res_tag}.json"
-                )
+                cand_res = [
+                    os.path.join(report_dir, f"varlen{full_res_tag}.json"),
+                    os.path.join(legacy_report_dir, f"varlen{full_res_tag}.json"),
+                ]
+                res_file = next((c for c in cand_res if os.path.isfile(c)), cand_res[0])
             elif strat == "residual":
                 res_tag = "-res" if not tag else f"-res{tag}"
-                res_file = os.path.join(
-                    repo_root, model_dir, "results", dataset, f"varlen{res_tag}.json"
-                )
+                cand_res = [
+                    os.path.join(report_dir, f"varlen{res_tag}.json"),
+                    os.path.join(legacy_report_dir, f"varlen{res_tag}.json"),
+                ]
+                res_file = next((c for c in cand_res if os.path.isfile(c)), cand_res[0])
 
             # Recommendation metrics
             metrics = {}
@@ -546,10 +571,12 @@ def main():
         # -------------------------------------------------------------
         # 2. MARKDOWN FORMATTING
         # -------------------------------------------------------------
+        tok_label = "Vanilla RQ-VAE" if tokenizer == "rqvae" else "LETTER"
         md_lines = [
-            f"# LETTER Strategy Comparison Report: {model_name} ({dataset})\n",
+            f"# {tok_label} Strategy Comparison Report: {model_name} ({dataset})\n",
             f"- **Dataset**: `{dataset}`",
             f"- **Model**: `{model_name}`",
+            f"- **Tokenizer**: `{tokenizer}`",
         ]
         if items_count and total_traffic:
             md_lines.extend([

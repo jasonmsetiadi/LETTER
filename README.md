@@ -87,53 +87,48 @@ to the downstream scripts, for example `--index_file .varlen.index.json`.
 
 ## Instantiation
 
-### Fixed-length end-to-end pipeline
+### Unified end-to-end pipeline
 
-After generating item embeddings, run the tokenizer, index generation, and
-TIGER pipeline with:
+After generating item embeddings, run the complete end-to-end pipeline using `run_pipeline.sh`:
 
+```bash
+# Fixed-length pipeline (default mode: fixed, default tokenizer: rqvae)
+bash run_pipeline.sh --dataset Instruments
+
+# Variable-length pipeline (mode: varlen, default tokenizer: rqvae)
+bash run_pipeline.sh --dataset Instruments --mode varlen
+
+# Run with LETTER tokenizer (collaborative alignment and diversity regularization)
+bash run_pipeline.sh --dataset Instruments --tokenizer letter
 ```
-bash run_fixed_length_pipeline.sh --dataset Instruments
-```
 
-The runner stores tokenizer checkpoints in `checkpoint/Instruments/<tokenizer>/`,
-index files in `data/Instruments/<tokenizer>/Instruments.index.fixed.json`
-(falling back to `data/Instruments/Instruments.index.fixed.json` if a legacy file
-already exists), model checkpoints in `ckpt/Instruments/<tokenizer>/`, and
-evaluation metrics in `results/Instruments/<tokenizer>/`. It defaults to TIGER on
-two GPUs. To also train and evaluate LC-Rec, provide a local LLaMA checkpoint and
-four GPUs:
+The runner stores tokenizer checkpoints in `checkpoint/<dataset>/<tokenizer>/`,
+index files in `data/<dataset>/<tokenizer>/` (with fallback to `data/<dataset>/`
+for existing legacy indices), model checkpoints in `ckpt/<dataset>/<tokenizer>/`, and
+evaluation metrics in `results/<dataset>/<tokenizer>/`.
 
-```
-bash run_fixed_length_pipeline.sh \
+To train and evaluate both TIGER and LC-Rec, provide a local LLaMA checkpoint and GPUs:
+
+```bash
+bash run_pipeline.sh \
   --dataset Instruments \
   --models tiger,lcrec \
   --base-model /absolute/path/to/llama
 ```
 
-Use `--tokenizer letter` (default) or `--tokenizer rqvae` (vanilla RQ-VAE) to
-select between the LETTER tokenizer (with collaborative alignment loss and
-diversity regularization) and a standard vanilla RQ-VAE (semantic reconstruction
-only). You can also pass `--tokenizer letter,rqvae` to train and evaluate both.
-Use `--rqvae-checkpoint PATH` to skip RQ-VAE training, `--models tiger` or
-`--models lcrec` to select a downstream model, and `--skip-evaluation` to omit
-the final test stage. For LETTER, it uses the paper-script defaults `--alpha 0.01`
-and `--beta 0.0001`; override them when needed. Existing generated indexes are
-protected unless `--overwrite-index` is supplied.
+#### Tokenizer Selection
+Use `--tokenizer rqvae` (default) for standard Vanilla RQ-VAE (semantic reconstruction
+only, no collaborative embeddings required). Use `--tokenizer letter` to run the
+LETTER tokenizer with collaborative alignment loss and diversity regularization.
 
-### Variable-length end-to-end pipeline
+#### Variable-Length Truncation
+When running with `--mode varlen`, item IDs are truncated from an intermediate
+fixed index using collision-free prefix pruning:
+- `--strategy`: `shortest_unique` (default), `popularity`, `collaborative`, or `residual`.
+- `--min-length` / `--max-length`: ID length bounds (defaults: 1 and 4).
+- `--collab-signal`: `frequency` (default), `user_entropy`, `pagerank`, `co_occurrence`, or `cf_density`.
 
-The variable-length runner first creates a fixed index and then truncates each
-item's code sequence to a collision-free length between one and four tokens:
-
-```
-bash run_variable_length_pipeline.sh --dataset Instruments
-```
-
-It writes `data/Instruments/Instruments.index.varlen.json` and trains TIGER
-with it. Use `--models tiger,lcrec --base-model /absolute/path/to/llama` to run
-both downstream models. Truncation defaults to the smart `shortest_unique` strategy,
-preserving minimal unique prefix paths without adding collisions.
+Use `--rqvae-checkpoint PATH` to skip RQ-VAE training, `--tokenizer-only` to stop after index generation, and `--skip-evaluation` to omit the test stage. Existing generated indexes are protected unless `--overwrite-index` is supplied.
 
 ### LETTER-TIGER
 
