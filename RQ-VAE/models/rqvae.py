@@ -101,9 +101,12 @@ class RQVAE(nn.Module):
         rqvae_n_diversity_loss = loss_recon + self.quant_loss_weight * quant_loss
 
         # CF_Loss
-        cf_embedding_in_batch = self.cf_embedding[emb_idx]
-        cf_embedding_in_batch = torch.from_numpy(cf_embedding_in_batch).to(dense_out.device)
-        cf_loss = self.CF_loss(dense_out, cf_embedding_in_batch)
+        if self.alpha > 0 and self.cf_embedding is not None:
+            cf_embedding_in_batch = self.cf_embedding[emb_idx]
+            cf_embedding_in_batch = torch.from_numpy(cf_embedding_in_batch).to(dense_out.device)
+            cf_loss = self.CF_loss(dense_out, cf_embedding_in_batch)
+        else:
+            cf_loss = torch.tensor(0.0, device=dense_out.device)
 
         total_loss = rqvae_n_diversity_loss + self.alpha * cf_loss
 

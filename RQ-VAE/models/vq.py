@@ -195,7 +195,10 @@ class VectorQuantizer(nn.Module):
         x_q = self.embedding(indices).view(x.shape)
 
         # Diversity
-        diversity_loss = self.diversity_loss_main_entry(x, x_q, indices, label)
+        if self.beta > 0 and label is not None and len(label) > 0:
+            diversity_loss = self.diversity_loss_main_entry(x, x_q, indices, label)
+        else:
+            diversity_loss = torch.tensor(0.0, device=x.device)
         # wandb.log({'diversity_loss': diversity_loss})
 
         # compute loss for embedding
