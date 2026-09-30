@@ -1,0 +1,578 @@
+{
+  "dataset": "Instruments",
+  "model": "LETTER-TIGER",
+  "catalog_items": 9922,
+  "total_traffic": 206153,
+  "min_length": 1,
+  "max_length": 10,
+  "strategy_comparison": [
+    {
+      "strategy": "fixed",
+      "mean_length": 10.0,
+      "weighted_length": 10.0,
+      "token_savings_pct": 0.0,
+      "collisions": 0,
+      "metrics": {
+        "hit@1": 0.060269659292749876,
+        "hit@5": 0.08388503148716292,
+        "hit@10": 0.10443242370418214,
+        "ndcg@5": 0.07212553988436782,
+        "ndcg@10": 0.07870505377602154
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "shortest_unique",
+      "mean_length": 2.9060673251360614,
+      "weighted_length": 3.0084160793197285,
+      "token_savings_pct": 69.91583920680272,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.053366704343613756,
+        "hit@5": 0.07488293234296786,
+        "hit@10": 0.09369449378330373,
+        "ndcg@5": 0.06404646965644746,
+        "ndcg@10": 0.07007577929171287
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "popularity:frequency",
+      "mean_length": 8.362930860713567,
+      "weighted_length": 5.868481176601844,
+      "token_savings_pct": 41.31518823398156,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.05231713224608429,
+        "hit@5": 0.07209752946875504,
+        "hit@10": 0.09090909090909091,
+        "ndcg@5": 0.06222969749860596,
+        "ndcg@10": 0.0682988901281985
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "popularity:user_entropy",
+      "mean_length": 6.574682523684741,
+      "weighted_length": 4.349633524615213,
+      "token_savings_pct": 56.50366475384787,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.05405296302276764,
+        "hit@5": 0.07460035523978685,
+        "hit@10": 0.09260455352817698,
+        "ndcg@5": 0.06436380149776931,
+        "ndcg@10": 0.07011477229293865
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "popularity:pagerank",
+      "mean_length": 7.91251763757307,
+      "weighted_length": 5.453876489791562,
+      "token_savings_pct": 45.46123510208437,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.05389149039237849,
+        "hit@5": 0.07306636525108993,
+        "hit@10": 0.09325044404973357,
+        "ndcg@5": 0.06338423239137952,
+        "ndcg@10": 0.06984886766289275
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "popularity:co_occurrence",
+      "mean_length": 8.090505946381779,
+      "weighted_length": 5.572371006000398,
+      "token_savings_pct": 44.27628993999602,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.05465848538672695,
+        "hit@5": 0.07399483287582755,
+        "hit@10": 0.09434038430486033,
+        "ndcg@5": 0.06452550040818857,
+        "ndcg@10": 0.07106372268925172
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "popularity:cf_density",
+      "mean_length": 6.227373513404555,
+      "weighted_length": 5.73178658569121,
+      "token_savings_pct": 42.6821341430879,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.044849023090586145,
+        "hit@5": 0.061036654287098334,
+        "hit@10": 0.07439851445180042,
+        "ndcg@5": 0.05296154634211585,
+        "ndcg@10": 0.0577409092356507
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "residual",
+      "mean_length": 9.342773634347914,
+      "weighted_length": 9.343288722453712,
+      "token_savings_pct": 6.5671127754628795,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.05986597771677701,
+        "hit@5": 0.08323914096560633,
+        "hit@10": 0.1017277571451639,
+        "ndcg@5": 0.07169122856801383,
+        "ndcg@10": 0.07804044735341244
+      },
+      "status": "completed"
+    }
+  ],
+  "recommendation_metrics": [
+    {
+      "strategy": "fixed",
+      "mean_length": 10.0,
+      "weighted_length": 10.0,
+      "token_savings_pct": 0.0,
+      "collisions": 0,
+      "metrics": {
+        "hit@1": 0.060269659292749876,
+        "hit@5": 0.08388503148716292,
+        "hit@10": 0.10443242370418214,
+        "ndcg@5": 0.07212553988436782,
+        "ndcg@10": 0.07870505377602154
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "shortest_unique",
+      "mean_length": 2.9060673251360614,
+      "weighted_length": 3.0084160793197285,
+      "token_savings_pct": 69.91583920680272,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.053366704343613756,
+        "hit@5": 0.07488293234296786,
+        "hit@10": 0.09369449378330373,
+        "ndcg@5": 0.06404646965644746,
+        "ndcg@10": 0.07007577929171287
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "popularity:frequency",
+      "mean_length": 8.362930860713567,
+      "weighted_length": 5.868481176601844,
+      "token_savings_pct": 41.31518823398156,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.05231713224608429,
+        "hit@5": 0.07209752946875504,
+        "hit@10": 0.09090909090909091,
+        "ndcg@5": 0.06222969749860596,
+        "ndcg@10": 0.0682988901281985
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "popularity:user_entropy",
+      "mean_length": 6.574682523684741,
+      "weighted_length": 4.349633524615213,
+      "token_savings_pct": 56.50366475384787,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.05405296302276764,
+        "hit@5": 0.07460035523978685,
+        "hit@10": 0.09260455352817698,
+        "ndcg@5": 0.06436380149776931,
+        "ndcg@10": 0.07011477229293865
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "popularity:pagerank",
+      "mean_length": 7.91251763757307,
+      "weighted_length": 5.453876489791562,
+      "token_savings_pct": 45.46123510208437,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.05389149039237849,
+        "hit@5": 0.07306636525108993,
+        "hit@10": 0.09325044404973357,
+        "ndcg@5": 0.06338423239137952,
+        "ndcg@10": 0.06984886766289275
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "popularity:co_occurrence",
+      "mean_length": 8.090505946381779,
+      "weighted_length": 5.572371006000398,
+      "token_savings_pct": 44.27628993999602,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.05465848538672695,
+        "hit@5": 0.07399483287582755,
+        "hit@10": 0.09434038430486033,
+        "ndcg@5": 0.06452550040818857,
+        "ndcg@10": 0.07106372268925172
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "popularity:cf_density",
+      "mean_length": 6.227373513404555,
+      "weighted_length": 5.73178658569121,
+      "token_savings_pct": 42.6821341430879,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.044849023090586145,
+        "hit@5": 0.061036654287098334,
+        "hit@10": 0.07439851445180042,
+        "ndcg@5": 0.05296154634211585,
+        "ndcg@10": 0.0577409092356507
+      },
+      "status": "completed"
+    },
+    {
+      "strategy": "residual",
+      "mean_length": 9.342773634347914,
+      "weighted_length": 9.343288722453712,
+      "token_savings_pct": 6.5671127754628795,
+      "collisions": 25,
+      "metrics": {
+        "hit@1": 0.05986597771677701,
+        "hit@5": 0.08323914096560633,
+        "hit@10": 0.1017277571451639,
+        "ndcg@5": 0.07169122856801383,
+        "ndcg@10": 0.07804044735341244
+      },
+      "status": "completed"
+    }
+  ],
+  "semantic_id_metrics": [
+    {
+      "strategy": "fixed",
+      "label": "Fixed (L=10)",
+      "basis": "Uniform fixed codebook depth L=10",
+      "mean_length": 10.0,
+      "traffic_weighted_length": 10.0,
+      "token_savings_pct": 0.0,
+      "length_distribution": {
+        "10": 9922
+      },
+      "collisions": 0,
+      "spearman_rho_vs_frequency": null
+    },
+    {
+      "strategy": "shortest_unique",
+      "label": "Shortest Unique",
+      "basis": "Shortest unambiguous trie prefix per item",
+      "mean_length": 2.9060673251360614,
+      "traffic_weighted_length": 3.0084160793197285,
+      "token_savings_pct": 69.91583920680272,
+      "length_distribution": {
+        "1": 5,
+        "2": 1577,
+        "3": 8024,
+        "4": 230,
+        "5": 27,
+        "6": 9,
+        "7": 2,
+        "10": 48
+      },
+      "collisions": 25,
+      "spearman_rho_vs_frequency": null
+    },
+    {
+      "strategy": "popularity:frequency",
+      "label": "Raw Frequency",
+      "basis": "Unigram count sum_u sum_t I(s_ut = i)",
+      "mean_length": 8.362930860713567,
+      "traffic_weighted_length": 5.868481176601844,
+      "token_savings_pct": 41.31518823398156,
+      "length_distribution": {
+        "2": 4,
+        "3": 215,
+        "4": 311,
+        "5": 427,
+        "6": 645,
+        "7": 977,
+        "8": 1467,
+        "9": 2260,
+        "10": 3616
+      },
+      "collisions": 25,
+      "spearman_rho_vs_frequency": 1.0
+    },
+    {
+      "strategy": "popularity:user_entropy",
+      "label": "User Audience Entropy",
+      "basis": "Shannon entropy H(i) over user audience",
+      "mean_length": 6.574682523684741,
+      "traffic_weighted_length": 4.349633524615213,
+      "token_savings_pct": 56.50366475384787,
+      "length_distribution": {
+        "2": 92,
+        "3": 1700,
+        "4": 926,
+        "5": 914,
+        "6": 1014,
+        "7": 1116,
+        "8": 1224,
+        "9": 1372,
+        "10": 1564
+      },
+      "collisions": 25,
+      "spearman_rho_vs_frequency": 1.0
+    },
+    {
+      "strategy": "popularity:pagerank",
+      "label": "Sequential PageRank",
+      "basis": "Stationary distribution on transition graph i -> j",
+      "mean_length": 7.91251763757307,
+      "traffic_weighted_length": 5.453876489791562,
+      "token_savings_pct": 45.46123510208437,
+      "length_distribution": {
+        "2": 7,
+        "3": 361,
+        "4": 464,
+        "5": 613,
+        "6": 870,
+        "7": 1191,
+        "8": 1592,
+        "9": 2043,
+        "10": 2781
+      },
+      "collisions": 25,
+      "spearman_rho_vs_frequency": 0.9318872531391584
+    },
+    {
+      "strategy": "popularity:co_occurrence",
+      "label": "Co-occurrence Degree",
+      "basis": "Unique co-occurring items across user interaction sessions",
+      "mean_length": 8.090505946381779,
+      "traffic_weighted_length": 5.572371006000398,
+      "token_savings_pct": 44.27628993999602,
+      "length_distribution": {
+        "2": 13,
+        "3": 463,
+        "4": 457,
+        "5": 525,
+        "6": 703,
+        "7": 949,
+        "8": 1324,
+        "9": 1927,
+        "10": 3561
+      },
+      "collisions": 25,
+      "spearman_rho_vs_frequency": 0.8315423710844648
+    },
+    {
+      "strategy": "popularity:cf_density",
+      "label": "CF Manifold Isolation",
+      "basis": "1 - kNN crowd cosine density in CF space",
+      "mean_length": 6.227373513404555,
+      "traffic_weighted_length": 5.73178658569121,
+      "token_savings_pct": 42.6821341430879,
+      "length_distribution": {
+        "2": 270,
+        "3": 2132,
+        "4": 938,
+        "5": 929,
+        "6": 961,
+        "7": 997,
+        "8": 1056,
+        "9": 1128,
+        "10": 1511
+      },
+      "collisions": 25,
+      "spearman_rho_vs_frequency": 0.41347978732277735
+    },
+    {
+      "strategy": "residual",
+      "label": "Residual (Thresh=0.2)",
+      "basis": "Shortest prefix with cumulative reconstruction error <= 0.2",
+      "mean_length": 9.342773634347914,
+      "traffic_weighted_length": 9.343288722453712,
+      "token_savings_pct": 6.5671127754628795,
+      "length_distribution": {
+        "1": 4,
+        "2": 2,
+        "3": 19,
+        "4": 70,
+        "5": 204,
+        "6": 425,
+        "7": 573,
+        "8": 544,
+        "9": 389,
+        "10": 7692
+      },
+      "collisions": 25,
+      "spearman_rho_vs_frequency": null
+    }
+  ],
+  "pairwise_exact_match_pct": {
+    "fixed": {
+      "fixed": 100.0,
+      "shortest_unique": 0.48,
+      "popularity:frequency": 36.44,
+      "popularity:user_entropy": 15.76,
+      "popularity:pagerank": 28.03,
+      "popularity:co_occurrence": 35.89,
+      "popularity:cf_density": 15.23,
+      "residual": 77.52
+    },
+    "shortest_unique": {
+      "fixed": 0.48,
+      "shortest_unique": 100.0,
+      "popularity:frequency": 3.25,
+      "popularity:user_entropy": 18.68,
+      "popularity:pagerank": 4.8,
+      "popularity:co_occurrence": 5.92,
+      "popularity:cf_density": 23.66,
+      "residual": 0.74
+    },
+    "popularity:frequency": {
+      "fixed": 36.44,
+      "shortest_unique": 3.25,
+      "popularity:frequency": 100.0,
+      "popularity:user_entropy": 18.52,
+      "popularity:pagerank": 50.73,
+      "popularity:co_occurrence": 52.35,
+      "popularity:cf_density": 13.77,
+      "residual": 29.67
+    },
+    "popularity:user_entropy": {
+      "fixed": 15.76,
+      "shortest_unique": 18.68,
+      "popularity:frequency": 18.52,
+      "popularity:user_entropy": 100.0,
+      "popularity:pagerank": 24.95,
+      "popularity:co_occurrence": 22.96,
+      "popularity:cf_density": 22.21,
+      "residual": 14.47
+    },
+    "popularity:pagerank": {
+      "fixed": 28.03,
+      "shortest_unique": 4.8,
+      "popularity:frequency": 50.73,
+      "popularity:user_entropy": 24.95,
+      "popularity:pagerank": 100.0,
+      "popularity:co_occurrence": 45.74,
+      "popularity:cf_density": 13.62,
+      "residual": 23.8
+    },
+    "popularity:co_occurrence": {
+      "fixed": 35.89,
+      "shortest_unique": 5.92,
+      "popularity:frequency": 52.35,
+      "popularity:user_entropy": 22.96,
+      "popularity:pagerank": 45.74,
+      "popularity:co_occurrence": 100.0,
+      "popularity:cf_density": 16.8,
+      "residual": 29.66
+    },
+    "popularity:cf_density": {
+      "fixed": 15.23,
+      "shortest_unique": 23.66,
+      "popularity:frequency": 13.77,
+      "popularity:user_entropy": 22.21,
+      "popularity:pagerank": 13.62,
+      "popularity:co_occurrence": 16.8,
+      "popularity:cf_density": 100.0,
+      "residual": 14.65
+    },
+    "residual": {
+      "fixed": 77.52,
+      "shortest_unique": 0.74,
+      "popularity:frequency": 29.67,
+      "popularity:user_entropy": 14.47,
+      "popularity:pagerank": 23.8,
+      "popularity:co_occurrence": 29.66,
+      "popularity:cf_density": 14.65,
+      "residual": 100.0
+    }
+  },
+  "pairwise_mae_tokens": {
+    "fixed": {
+      "fixed": 0.0,
+      "shortest_unique": 7.094,
+      "popularity:frequency": 1.637,
+      "popularity:user_entropy": 3.425,
+      "popularity:pagerank": 2.087,
+      "popularity:co_occurrence": 1.909,
+      "popularity:cf_density": 3.773,
+      "residual": 0.657
+    },
+    "shortest_unique": {
+      "fixed": 7.094,
+      "shortest_unique": 0.0,
+      "popularity:frequency": 5.457,
+      "popularity:user_entropy": 3.669,
+      "popularity:pagerank": 5.006,
+      "popularity:co_occurrence": 5.184,
+      "popularity:cf_density": 3.321,
+      "residual": 6.437
+    },
+    "popularity:frequency": {
+      "fixed": 1.637,
+      "shortest_unique": 5.457,
+      "popularity:frequency": 0.0,
+      "popularity:user_entropy": 1.788,
+      "popularity:pagerank": 0.528,
+      "popularity:co_occurrence": 0.62,
+      "popularity:cf_density": 2.698,
+      "residual": 1.836
+    },
+    "popularity:user_entropy": {
+      "fixed": 3.425,
+      "shortest_unique": 3.669,
+      "popularity:frequency": 1.788,
+      "popularity:user_entropy": 0.0,
+      "popularity:pagerank": 1.383,
+      "popularity:co_occurrence": 1.685,
+      "popularity:cf_density": 2.098,
+      "residual": 3.254
+    },
+    "popularity:pagerank": {
+      "fixed": 2.087,
+      "shortest_unique": 5.006,
+      "popularity:frequency": 0.528,
+      "popularity:user_entropy": 1.383,
+      "popularity:pagerank": 0.0,
+      "popularity:co_occurrence": 0.711,
+      "popularity:cf_density": 2.543,
+      "residual": 2.161
+    },
+    "popularity:co_occurrence": {
+      "fixed": 1.909,
+      "shortest_unique": 5.184,
+      "popularity:frequency": 0.62,
+      "popularity:user_entropy": 1.685,
+      "popularity:pagerank": 0.711,
+      "popularity:co_occurrence": 0.0,
+      "popularity:cf_density": 2.557,
+      "residual": 2.053
+    },
+    "popularity:cf_density": {
+      "fixed": 3.773,
+      "shortest_unique": 3.321,
+      "popularity:frequency": 2.698,
+      "popularity:user_entropy": 2.098,
+      "popularity:pagerank": 2.543,
+      "popularity:co_occurrence": 2.557,
+      "popularity:cf_density": 0.0,
+      "residual": 3.505
+    },
+    "residual": {
+      "fixed": 0.657,
+      "shortest_unique": 6.437,
+      "popularity:frequency": 1.836,
+      "popularity:user_entropy": 3.254,
+      "popularity:pagerank": 2.161,
+      "popularity:co_occurrence": 2.053,
+      "popularity:cf_density": 3.505,
+      "residual": 0.0
+    }
+  }
+}
