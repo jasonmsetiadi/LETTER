@@ -805,11 +805,11 @@ fi
 # =========================================================================
 
 if contains_model tiger; then
-  local tiger_ckpt_dir="$CUR_TIGER_CKPT"
+  tiger_ckpt_dir="$CUR_TIGER_CKPT"
   if [[ "$tiger_ckpt_dir" != /* ]]; then
     tiger_ckpt_dir="$REPO_ROOT/LETTER-TIGER/$tiger_ckpt_dir"
   fi
-  local tiger_trained=false
+  tiger_trained=false
   if [[ -f "$tiger_ckpt_dir/pytorch_model.bin" || -f "$tiger_ckpt_dir/model.safetensors" || -f "$tiger_ckpt_dir/trainer_state.json" ]]; then
     tiger_trained=true
   fi
@@ -884,11 +884,11 @@ if contains_model tiger; then
 fi
 
 if contains_model lcrec; then
-  local lcrec_ckpt_dir="$CUR_LCREC_CKPT"
+  lcrec_ckpt_dir="$CUR_LCREC_CKPT"
   if [[ "$lcrec_ckpt_dir" != /* ]]; then
     lcrec_ckpt_dir="$REPO_ROOT/LETTER-LC-Rec/$lcrec_ckpt_dir"
   fi
-  local lcrec_trained=false
+  lcrec_trained=false
   if [[ -f "$lcrec_ckpt_dir/adapter_model.bin" || -f "$lcrec_ckpt_dir/adapter_model.safetensors" || -f "$lcrec_ckpt_dir/pytorch_model.bin" || -f "$lcrec_ckpt_dir/model.safetensors" || -f "$lcrec_ckpt_dir/trainer_state.json" ]]; then
     lcrec_trained=true
   fi
