@@ -545,29 +545,6 @@ def main():
         summary_text = "\n".join(full_text_lines)
         print(summary_text)
 
-        # Save Text report
-        report_txt = os.path.join(report_dir, f"strategy_comparison{tag}.txt")
-        with open(report_txt, "w", encoding="utf-8") as f:
-            f.write(summary_text + "\n")
-
-        # Save JSON report
-        report_payload = {
-            "dataset": dataset,
-            "model": model_name,
-            "catalog_items": items_count,
-            "total_traffic": total_traffic,
-            "min_length": min_length,
-            "max_length": max_length,
-            "strategy_comparison": recom_table_data,
-            "recommendation_metrics": recom_table_data,
-            "semantic_id_metrics": sid_table_data,
-        }
-        if pairwise_match:
-            report_payload["pairwise_exact_match_pct"] = pairwise_match
-            report_payload["pairwise_mae_tokens"] = pairwise_mae
-        with open(report_json, "w", encoding="utf-8") as f:
-            json.dump(report_payload, f, indent=2)
-
         # -------------------------------------------------------------
         # 2. MARKDOWN FORMATTING
         # -------------------------------------------------------------
@@ -691,10 +668,7 @@ def main():
         report_md = os.path.join(report_dir, f"strategy_comparison{tag}.md")
         with open(report_md, "w", encoding="utf-8") as f:
             f.write("\n".join(md_lines) + "\n")
-
-        print(f"\nSaved text report to:     {report_txt}")
-        print(f"Saved JSON report to:     {report_json}")
-        print(f"Saved Markdown report to: {report_md}\n")
+        print(f"\nSaved Markdown report to: {report_md}\n")
 
 
 if __name__ == "__main__":
