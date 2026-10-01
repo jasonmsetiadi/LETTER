@@ -202,37 +202,19 @@ def evaluate_semantic_ids(
 
     if index_file is None:
         cand_list = []
-        if tokenizer and (dataset_dir / tokenizer).is_dir():
-            if max_length != 4:
-                cand_list.extend([
-                    tok_dir / f"{dataset}.index.fixed-for-varlen.L{max_length}.json",
-                    tok_dir / f"{dataset}.index.fixed.L{max_length}.json",
-                    tok_dir / f"{dataset}.index.fixed.json",
-                    tok_dir / f"{dataset}.index.fixed-for-varlen.json",
-                    tok_dir / f"{dataset}.index.json",
-                ])
-            else:
-                cand_list.extend([
-                    tok_dir / f"{dataset}.index.fixed.json",
-                    tok_dir / f"{dataset}.index.json",
-                    tok_dir / f"{dataset}.index.fixed-for-varlen.json",
-                ])
-
         if max_length != 4:
             cand_list.extend([
-                dataset_dir / f"{dataset}.index.fixed-for-varlen.L{max_length}.json",
-                dataset_dir / f"{dataset}.index.fixed.L{max_length}.json",
-                dataset_dir / f"{dataset}.index.fixed.json",
-                dataset_dir / f"{dataset}.index.fixed-for-varlen.json",
-                dataset_dir / f"{dataset}.index.json",
+                tok_dir / f"{dataset}.index.fixed-for-varlen.L{max_length}.json",
+                tok_dir / f"{dataset}.index.fixed.L{max_length}.json",
+                tok_dir / f"{dataset}.index.fixed.json",
+                tok_dir / f"{dataset}.index.fixed-for-varlen.json",
             ])
         else:
             cand_list.extend([
-                dataset_dir / f"{dataset}.index.json",
-                dataset_dir / f"{dataset}.index.fixed-for-varlen.json",
-                dataset_dir / f"{dataset}.index.fixed.json",
+                tok_dir / f"{dataset}.index.fixed.json",
+                tok_dir / f"{dataset}.index.fixed-for-varlen.json",
             ])
-        index_file = next((c for c in cand_list if c.exists()), cand_list[-1])
+        index_file = next((c for c in cand_list if c.exists()), cand_list[0])
     index_file = Path(index_file)
     if not index_file.exists():
         raise FileNotFoundError(f"Index file not found: {index_file}")

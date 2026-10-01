@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 # Add RQ-VAE directory to sys.path for local module resolution
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "RQ-VAE"))
 from compare_semantic_ids import evaluate_semantic_ids
 
 
@@ -17,7 +17,7 @@ def parse_args():
     parser.add_argument(
         "--repo-root",
         type=str,
-        default=str(Path(__file__).resolve().parent.parent),
+        default=str(Path(__file__).resolve().parent),
         help="Repository root directory.",
     )
     parser.add_argument(
@@ -149,12 +149,7 @@ def main():
     for model in models:
         model_name = "LETTER-TIGER" if model == "tiger" else "LETTER-LC-Rec"
         model_dir = "LETTER-TIGER" if model == "tiger" else "LETTER-LC-Rec"
-        tok_report_dir = os.path.join(repo_root, model_dir, "results", dataset, tokenizer)
-        legacy_report_dir = os.path.join(repo_root, model_dir, "results", dataset)
-        if os.path.isdir(tok_report_dir) or tokenizer != "letter":
-            report_dir = tok_report_dir
-        else:
-            report_dir = legacy_report_dir
+        report_dir = os.path.join(repo_root, model_dir, "results", dataset, tokenizer)
         os.makedirs(report_dir, exist_ok=True)
         report_json = os.path.join(report_dir, f"strategy_comparison{tag}.json")
 
@@ -248,17 +243,9 @@ def main():
             res_file = None
             if strat == "fixed":
                 res_fname = "fixed.json" if max_length == 4 else f"fixed_L{max_length}.json"
-                cand_res = [
-                    os.path.join(report_dir, res_fname),
-                    os.path.join(legacy_report_dir, res_fname),
-                ]
-                res_file = next((c for c in cand_res if os.path.isfile(c)), cand_res[0])
+                res_file = os.path.join(report_dir, res_fname)
             elif strat == "shortest_unique":
-                cand_res = [
-                    os.path.join(report_dir, f"varlen{tag}.json"),
-                    os.path.join(legacy_report_dir, f"varlen{tag}.json"),
-                ]
-                res_file = next((c for c in cand_res if os.path.isfile(c)), cand_res[0])
+                res_file = os.path.join(report_dir, f"varlen{tag}.json")
             elif (
                 strat == "popularity"
                 or strat.startswith("popularity:")
@@ -286,18 +273,10 @@ def main():
                 }
                 _, res_tag = sig_map.get(sig, (f"pop-{sig}", f"-pop-{sig}"))
                 full_res_tag = res_tag if not tag else f"{res_tag}{tag}"
-                cand_res = [
-                    os.path.join(report_dir, f"varlen{full_res_tag}.json"),
-                    os.path.join(legacy_report_dir, f"varlen{full_res_tag}.json"),
-                ]
-                res_file = next((c for c in cand_res if os.path.isfile(c)), cand_res[0])
+                res_file = os.path.join(report_dir, f"varlen{full_res_tag}.json")
             elif strat == "residual":
                 res_tag = "-res" if not tag else f"-res{tag}"
-                cand_res = [
-                    os.path.join(report_dir, f"varlen{res_tag}.json"),
-                    os.path.join(legacy_report_dir, f"varlen{res_tag}.json"),
-                ]
-                res_file = next((c for c in cand_res if os.path.isfile(c)), cand_res[0])
+                res_file = os.path.join(report_dir, f"varlen{res_tag}.json")
 
             # Recommendation metrics
             metrics = {}
