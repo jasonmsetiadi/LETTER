@@ -346,7 +346,7 @@ if [[ "$MODE" == "varlen" ]]; then
   esac
 fi
 
-EMBEDDING_FILE="${EMBEDDING_FILE:-$DATA_ROOT/$DATASET/$DATASET.emb-flan-t5-xl-td.npy}"
+EMBEDDING_FILE="${EMBEDDING_FILE:-$DATA_ROOT/$DATASET/$DATASET.emb-bert-base-uncased-td.npy}"
 CF_EMBEDDING="${CF_EMBEDDING:-$REPO_ROOT/RQ-VAE/ckpt/$DATASET-32d-sasrec.pt}"
 
 contains_model() {
@@ -498,7 +498,7 @@ if args and hasattr(args, "num_emb_list"):
   fi
 
   if [[ ! -f "$EMBEDDING_FILE" ]]; then
-    printf 'Item embeddings not found: %s\nRun data_process/preprocess_item_embeddings.sh first.\n' "$EMBEDDING_FILE" >&2
+    printf 'Item embeddings not found: %s\nRun preprocess_item_embeddings.sh first.\n' "$EMBEDDING_FILE" >&2
     exit 1
   fi
   if [[ "$TOK_NEEDS_CF" == true && ! -f "$CF_EMBEDDING" ]]; then

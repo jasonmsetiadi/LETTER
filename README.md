@@ -34,14 +34,13 @@ the required `<dataset>.emb-<model>-td.npy` file from the dataset's
 `<dataset>.item.json` metadata with a local Hugging Face model checkpoint:
 
 ```
-bash data_process/preprocess_item_embeddings.sh \
+bash preprocess_item_embeddings.sh \
   --dataset Instruments \
   --gpu-id 0
 ```
 
-The default model is `google/flan-t5-xl`, loaded through its encoder-only
-`T5EncoderModel`, and the script writes
-`data/Instruments/Instruments.emb-flan-t5-xl-td.npy`. It refuses to replace an
+The default model is `bert-base-uncased`, and the script writes
+`data/Instruments/Instruments.emb-bert-base-uncased-td.npy`. It refuses to replace an
 existing output unless `--overwrite` is supplied, and accepts `--data-root`,
 `--plm-name`, `--plm-checkpoint`, `--max-sent-len`, and `--python` overrides.
 `--plm-checkpoint` may be either an existing local model directory or a valid

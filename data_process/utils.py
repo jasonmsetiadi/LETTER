@@ -79,7 +79,7 @@ def set_device(gpu_id):
         return torch.device(
             'cuda:' + str(gpu_id) if torch.cuda.is_available() else 'cpu')
 
-def load_plm(model_path='google/flan-t5-xl'):
+def load_plm(model_path='bert-base-uncased'):
 
     tokenizer = AutoTokenizer.from_pretrained(model_path,)
 

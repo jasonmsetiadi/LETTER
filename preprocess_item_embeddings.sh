@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  bash data_process/preprocess_item_embeddings.sh \
+  bash preprocess_item_embeddings.sh \
     --dataset DATASET \
     [--plm-checkpoint MODEL_OR_PATH] \
     [--data-root PATH] [--gpu-id ID] [--plm-name NAME] \
@@ -16,12 +16,12 @@ The output is stored as:
 EOF
 }
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CALLER_DIR="$(pwd)"
 DATA_ROOT="$REPO_ROOT/data"
 DATASET=""
-PLM_CHECKPOINT="google/flan-t5-xl"
-PLM_NAME="flan-t5-xl"
+PLM_CHECKPOINT="bert-base-uncased"
+PLM_NAME="bert-base-uncased"
 GPU_ID="0"
 MAX_SENT_LEN="2048"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
@@ -81,7 +81,7 @@ fi
 
 if [[ "$PLM_CHECKPOINT" == /* || "$PLM_CHECKPOINT" == ./* || "$PLM_CHECKPOINT" == ../* ]] && [[ ! -d "$PLM_CHECKPOINT" ]]; then
   printf 'Local model checkpoint directory not found: %s\n' "$PLM_CHECKPOINT" >&2
-  printf 'Provide an existing directory or a Hugging Face model ID such as google/flan-t5-xl.\n' >&2
+  printf 'Provide an existing directory or a valid Hugging Face model ID.\n' >&2
   exit 1
 fi
 

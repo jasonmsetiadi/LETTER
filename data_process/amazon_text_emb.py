@@ -110,9 +110,9 @@ def parse_args():
     parser.add_argument('--dataset', type=str, default='Instruments', help='Instruments / Arts / Games')
     parser.add_argument('--root', type=str, default="")
     parser.add_argument('--gpu_id', type=int, default=2, help='ID of running GPU')
-    parser.add_argument('--plm_name', type=str, default='flan-t5-xl')
+    parser.add_argument('--plm_name', type=str, default='llama')
     parser.add_argument('--plm_checkpoint', type=str,
-                        default='google/flan-t5-xl')
+                        default='')
     parser.add_argument('--max_sent_len', type=int, default=2048)
     parser.add_argument('--word_drop_ratio', type=float, default=-1, help='word drop ratio, do not drop by default')
     return parser.parse_args()
