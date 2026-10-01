@@ -801,7 +801,7 @@ fi
 if contains_model tiger; then
   printf '\n[TIGER] [%s] [%s] Training...\n' "$TOK_LABEL" "$MODE"
   STEP_START="$SECONDS"
-  mkdir -p "$(dirname "$CUR_TIGER_RESULTS")"
+  mkdir -p "$REPO_ROOT/LETTER-TIGER/$(dirname "$CUR_TIGER_RESULTS")"
   (
     cd "$REPO_ROOT/LETTER-TIGER"
     TIGER_COUNT="$(gpu_count "$TIGER_GPUS")"
@@ -842,6 +842,7 @@ if contains_model tiger; then
     STEP_START="$SECONDS"
     (
       cd "$REPO_ROOT/LETTER-TIGER"
+      mkdir -p "$(dirname "$CUR_TIGER_RESULTS")"
       "$PYTHON_BIN" test.py \
         --gpu_id 0 \
         --ckpt_path "$CUR_TIGER_CKPT" \
@@ -863,7 +864,7 @@ fi
 if contains_model lcrec; then
   printf '\n[LC-Rec] [%s] [%s] Training...\n' "$TOK_LABEL" "$MODE"
   STEP_START="$SECONDS"
-  mkdir -p "$(dirname "$CUR_LCREC_RESULTS")"
+  mkdir -p "$REPO_ROOT/LETTER-LC-Rec/$(dirname "$CUR_LCREC_RESULTS")"
   (
     cd "$REPO_ROOT/LETTER-LC-Rec"
     LCREC_COUNT="$(gpu_count "$LCREC_GPUS")"
@@ -914,6 +915,7 @@ if contains_model lcrec; then
     STEP_START="$SECONDS"
     (
       cd "$REPO_ROOT/LETTER-LC-Rec"
+      mkdir -p "$(dirname "$CUR_LCREC_RESULTS")"
       TEST_PORT="$(find_free_port 4324)"
       CUDA_VISIBLE_DEVICES="$LCREC_GPUS" torchrun \
         --nproc_per_node="$(gpu_count "$LCREC_GPUS")" \

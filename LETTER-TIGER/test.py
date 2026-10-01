@@ -155,6 +155,9 @@ def test(args):
     save_data["max_results"] = max_results
     save_data["all_prompt_results"] = all_prompt_results
 
+    res_dir = os.path.dirname(args.results_file)
+    if res_dir:
+        ensure_dir(res_dir)
     with open(args.results_file, "w") as f:
         json.dump(save_data, f, indent=4)
 
