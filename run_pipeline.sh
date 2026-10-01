@@ -21,6 +21,8 @@ Pipeline & Mode Options:
   --models LIST                Comma-separated: tiger,lcrec (default: tiger)
   --base-model PATH            Base model for LC-Rec (default: huggyllama/llama-7b)
   --tokenizer-only             Stop after index generation (skip downstream recommenders)
+  --skip-training, --eval-only Skip training downstream models and run evaluation only
+  --retrain-model              Force training downstream models even if checkpoint exists
   --skip-evaluation            Train recommenders without evaluating
 
 RQ-VAE / Tokenizer Options:
@@ -119,6 +121,8 @@ BASE_MODEL="${BASE_MODEL:-huggyllama/llama-7b}"
 TIGER_GPUS=""
 LCREC_GPUS=""
 RESULTS_FILE=""
+SKIP_TRAINING=false
+RETRAIN_MODEL=false
 SKIP_EVALUATION=false
 OVERWRITE_INDEX=false
 TOKENIZER_ONLY=false
@@ -156,6 +160,8 @@ while [[ $# -gt 0 ]]; do
     --tiger-gpus) TIGER_GPUS="$2"; shift 2 ;;
     --lcrec-gpus) LCREC_GPUS="$2"; shift 2 ;;
     --results-file) RESULTS_FILE="$2"; shift 2 ;;
+    --skip-training|--eval-only) SKIP_TRAINING=true; shift ;;
+    --retrain-model) RETRAIN_MODEL=true; shift ;;
     --skip-evaluation) SKIP_EVALUATION=true; shift ;;
     --overwrite-index) OVERWRITE_INDEX=true; shift ;;
     --tokenizer-only) TOKENIZER_ONLY=true; shift ;;
@@ -799,43 +805,59 @@ fi
 # =========================================================================
 
 if contains_model tiger; then
-  printf '\n[TIGER] [%s] [%s] Training...\n' "$TOK_LABEL" "$MODE"
-  STEP_START="$SECONDS"
-  mkdir -p "$REPO_ROOT/LETTER-TIGER/$(dirname "$CUR_TIGER_RESULTS")"
-  (
-    cd "$REPO_ROOT/LETTER-TIGER"
-    TIGER_COUNT="$(gpu_count "$TIGER_GPUS")"
-    if [[ "$TIGER_COUNT" -le 1 ]]; then
-      printf '[TIGER] Single GPU mode (%s) - running directly without DDP.\n' "$TIGER_GPUS"
-      CUDA_VISIBLE_DEVICES="$TIGER_GPUS" "$PYTHON_BIN" finetune.py \
-        --output_dir "$CUR_TIGER_CKPT" \
-        --dataset "$DATASET" \
-        --data_path "$DATA_ROOT" \
-        --per_device_batch_size 256 \
-        --learning_rate 5e-4 \
-        --epochs 200 \
-        --index_file "$TARGET_INDEX_ARG" \
-        --temperature 1.0
-    else
-      TIGER_PORT="$(find_free_port 2314)"
-      CUDA_VISIBLE_DEVICES="$TIGER_GPUS" torchrun \
-        --nproc_per_node="$TIGER_COUNT" \
-        --master_port="$TIGER_PORT" \
-        finetune.py \
-        --output_dir "$CUR_TIGER_CKPT" \
-        --dataset "$DATASET" \
-        --data_path "$DATA_ROOT" \
-        --per_device_batch_size 256 \
-        --learning_rate 5e-4 \
-        --epochs 200 \
-        --index_file "$TARGET_INDEX_ARG" \
-        --temperature 1.0
-    fi
-  )
-  printf 'Completed [%s] [%s] LETTER-TIGER training in %s.\n' \
-    "$TOK_LABEL" "$MODE" "$(format_duration "$((SECONDS - STEP_START))")"
-  record_phase "[$TOK_LABEL] [$MODE] LETTER-TIGER training" "$((SECONDS - STEP_START))"
-  printf 'Stored LETTER-TIGER checkpoint: %s\n' "$CUR_TIGER_CKPT"
+  local tiger_ckpt_dir="$CUR_TIGER_CKPT"
+  if [[ "$tiger_ckpt_dir" != /* ]]; then
+    tiger_ckpt_dir="$REPO_ROOT/LETTER-TIGER/$tiger_ckpt_dir"
+  fi
+  local tiger_trained=false
+  if [[ -f "$tiger_ckpt_dir/pytorch_model.bin" || -f "$tiger_ckpt_dir/model.safetensors" || -f "$tiger_ckpt_dir/trainer_state.json" ]]; then
+    tiger_trained=true
+  fi
+
+  if [[ "$tiger_trained" == true && "$RETRAIN_MODEL" != true ]]; then
+    printf '\n[TIGER] [%s] [%s] Found existing trained model: %s\n' "$TOK_LABEL" "$MODE" "$CUR_TIGER_CKPT"
+    printf '[TIGER] Skipping training and resuming straight to evaluation (pass --retrain-model to retrain).\n'
+  elif [[ "$SKIP_TRAINING" == true ]]; then
+    printf '\n[TIGER] [%s] [%s] Skipping training (--skip-training specified).\n' "$TOK_LABEL" "$MODE"
+  else
+    printf '\n[TIGER] [%s] [%s] Training...\n' "$TOK_LABEL" "$MODE"
+    STEP_START="$SECONDS"
+    mkdir -p "$REPO_ROOT/LETTER-TIGER/$(dirname "$CUR_TIGER_RESULTS")"
+    (
+      cd "$REPO_ROOT/LETTER-TIGER"
+      TIGER_COUNT="$(gpu_count "$TIGER_GPUS")"
+      if [[ "$TIGER_COUNT" -le 1 ]]; then
+        printf '[TIGER] Single GPU mode (%s) - running directly without DDP.\n' "$TIGER_GPUS"
+        CUDA_VISIBLE_DEVICES="$TIGER_GPUS" "$PYTHON_BIN" finetune.py \
+          --output_dir "$CUR_TIGER_CKPT" \
+          --dataset "$DATASET" \
+          --data_path "$DATA_ROOT" \
+          --per_device_batch_size 256 \
+          --learning_rate 5e-4 \
+          --epochs 200 \
+          --index_file "$TARGET_INDEX_ARG" \
+          --temperature 1.0
+      else
+        TIGER_PORT="$(find_free_port 2314)"
+        CUDA_VISIBLE_DEVICES="$TIGER_GPUS" torchrun \
+          --nproc_per_node="$TIGER_COUNT" \
+          --master_port="$TIGER_PORT" \
+          finetune.py \
+          --output_dir "$CUR_TIGER_CKPT" \
+          --dataset "$DATASET" \
+          --data_path "$DATA_ROOT" \
+          --per_device_batch_size 256 \
+          --learning_rate 5e-4 \
+          --epochs 200 \
+          --index_file "$TARGET_INDEX_ARG" \
+          --temperature 1.0
+      fi
+    )
+    printf 'Completed [%s] [%s] LETTER-TIGER training in %s.\n' \
+      "$TOK_LABEL" "$MODE" "$(format_duration "$((SECONDS - STEP_START))")"
+    record_phase "[$TOK_LABEL] [$MODE] LETTER-TIGER training" "$((SECONDS - STEP_START))"
+    printf 'Stored LETTER-TIGER checkpoint: %s\n' "$CUR_TIGER_CKPT"
+  fi
 
   if [[ "$SKIP_EVALUATION" != true ]]; then
     printf '\n[TIGER] [%s] [%s] Evaluating...\n' "$TOK_LABEL" "$MODE"
@@ -862,53 +884,69 @@ if contains_model tiger; then
 fi
 
 if contains_model lcrec; then
-  printf '\n[LC-Rec] [%s] [%s] Training...\n' "$TOK_LABEL" "$MODE"
-  STEP_START="$SECONDS"
-  mkdir -p "$REPO_ROOT/LETTER-LC-Rec/$(dirname "$CUR_LCREC_RESULTS")"
-  (
-    cd "$REPO_ROOT/LETTER-LC-Rec"
-    LCREC_COUNT="$(gpu_count "$LCREC_GPUS")"
-    if [[ "$LCREC_COUNT" -le 1 ]]; then
-      printf '[LC-Rec] Single GPU mode (%s) - skipping DDP for 8-bit quantized training.\n' "$LCREC_GPUS"
-      CUDA_VISIBLE_DEVICES="$LCREC_GPUS" "$PYTHON_BIN" lora_finetune.py \
-        --base_model "$BASE_MODEL" \
-        --output_dir "$CUR_LCREC_CKPT" \
-        --dataset "$DATASET" \
-        --data_path "$DATA_ROOT" \
-        --per_device_batch_size 16 \
-        --learning_rate 1e-4 \
-        --epochs 4 \
-        --tasks seqrec \
-        --train_prompt_sample_num 1 \
-        --train_data_sample_num 0 \
-        --index_file "$TARGET_INDEX_ARG" \
-        --wandb_run_name "$CUR_LCREC_WANDB" \
-        --temperature 1.0
-    else
-      LCREC_PORT="$(find_free_port 3325)"
-      CUDA_VISIBLE_DEVICES="$LCREC_GPUS" torchrun \
-        --nproc_per_node="$LCREC_COUNT" \
-        --master_port="$LCREC_PORT" \
-        lora_finetune.py \
-        --base_model "$BASE_MODEL" \
-        --output_dir "$CUR_LCREC_CKPT" \
-        --dataset "$DATASET" \
-        --data_path "$DATA_ROOT" \
-        --per_device_batch_size 16 \
-        --learning_rate 1e-4 \
-        --epochs 4 \
-        --tasks seqrec \
-        --train_prompt_sample_num 1 \
-        --train_data_sample_num 0 \
-        --index_file "$TARGET_INDEX_ARG" \
-        --wandb_run_name "$CUR_LCREC_WANDB" \
-        --temperature 1.0
-    fi
-  )
-  printf 'Completed [%s] [%s] LETTER-LC-Rec training in %s.\n' \
-    "$TOK_LABEL" "$MODE" "$(format_duration "$((SECONDS - STEP_START))")"
-  record_phase "[$TOK_LABEL] [$MODE] LETTER-LC-Rec training" "$((SECONDS - STEP_START))"
-  printf 'Stored LETTER-LC-Rec checkpoint: %s\n' "$CUR_LCREC_CKPT"
+  local lcrec_ckpt_dir="$CUR_LCREC_CKPT"
+  if [[ "$lcrec_ckpt_dir" != /* ]]; then
+    lcrec_ckpt_dir="$REPO_ROOT/LETTER-LC-Rec/$lcrec_ckpt_dir"
+  fi
+  local lcrec_trained=false
+  if [[ -f "$lcrec_ckpt_dir/adapter_model.bin" || -f "$lcrec_ckpt_dir/adapter_model.safetensors" || -f "$lcrec_ckpt_dir/pytorch_model.bin" || -f "$lcrec_ckpt_dir/model.safetensors" || -f "$lcrec_ckpt_dir/trainer_state.json" ]]; then
+    lcrec_trained=true
+  fi
+
+  if [[ "$lcrec_trained" == true && "$RETRAIN_MODEL" != true ]]; then
+    printf '\n[LC-Rec] [%s] [%s] Found existing trained model: %s\n' "$TOK_LABEL" "$MODE" "$CUR_LCREC_CKPT"
+    printf '[LC-Rec] Skipping training and resuming straight to evaluation (pass --retrain-model to retrain).\n'
+  elif [[ "$SKIP_TRAINING" == true ]]; then
+    printf '\n[LC-Rec] [%s] [%s] Skipping training (--skip-training specified).\n' "$TOK_LABEL" "$MODE"
+  else
+    printf '\n[LC-Rec] [%s] [%s] Training...\n' "$TOK_LABEL" "$MODE"
+    STEP_START="$SECONDS"
+    mkdir -p "$REPO_ROOT/LETTER-LC-Rec/$(dirname "$CUR_LCREC_RESULTS")"
+    (
+      cd "$REPO_ROOT/LETTER-LC-Rec"
+      LCREC_COUNT="$(gpu_count "$LCREC_GPUS")"
+      if [[ "$LCREC_COUNT" -le 1 ]]; then
+        printf '[LC-Rec] Single GPU mode (%s) - skipping DDP for 8-bit quantized training.\n' "$LCREC_GPUS"
+        CUDA_VISIBLE_DEVICES="$LCREC_GPUS" "$PYTHON_BIN" lora_finetune.py \
+          --base_model "$BASE_MODEL" \
+          --output_dir "$CUR_LCREC_CKPT" \
+          --dataset "$DATASET" \
+          --data_path "$DATA_ROOT" \
+          --per_device_batch_size 16 \
+          --learning_rate 1e-4 \
+          --epochs 4 \
+          --tasks seqrec \
+          --train_prompt_sample_num 1 \
+          --train_data_sample_num 0 \
+          --index_file "$TARGET_INDEX_ARG" \
+          --wandb_run_name "$CUR_LCREC_WANDB" \
+          --temperature 1.0
+      else
+        LCREC_PORT="$(find_free_port 3325)"
+        CUDA_VISIBLE_DEVICES="$LCREC_GPUS" torchrun \
+          --nproc_per_node="$LCREC_COUNT" \
+          --master_port="$LCREC_PORT" \
+          lora_finetune.py \
+          --base_model "$BASE_MODEL" \
+          --output_dir "$CUR_LCREC_CKPT" \
+          --dataset "$DATASET" \
+          --data_path "$DATA_ROOT" \
+          --per_device_batch_size 16 \
+          --learning_rate 1e-4 \
+          --epochs 4 \
+          --tasks seqrec \
+          --train_prompt_sample_num 1 \
+          --train_data_sample_num 0 \
+          --index_file "$TARGET_INDEX_ARG" \
+          --wandb_run_name "$CUR_LCREC_WANDB" \
+          --temperature 1.0
+      fi
+    )
+    printf 'Completed [%s] [%s] LETTER-LC-Rec training in %s.\n' \
+      "$TOK_LABEL" "$MODE" "$(format_duration "$((SECONDS - STEP_START))")"
+    record_phase "[$TOK_LABEL] [$MODE] LETTER-LC-Rec training" "$((SECONDS - STEP_START))"
+    printf 'Stored LETTER-LC-Rec checkpoint: %s\n' "$CUR_LCREC_CKPT"
+  fi
 
   if [[ "$SKIP_EVALUATION" != true ]]; then
     printf '\n[LC-Rec] [%s] [%s] Evaluating...\n' "$TOK_LABEL" "$MODE"
