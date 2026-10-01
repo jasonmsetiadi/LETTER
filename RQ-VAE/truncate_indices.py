@@ -382,6 +382,164 @@ def truncate_indices(
     return truncated, lengths
 
 
+def resolve_target_lengths(
+    num_items,
+    target_lengths=None,
+    strategy="popularity",
+    inter_source=None,
+    collab_signal="frequency",
+    cf_emb_file=None,
+    top_k_cf=10,
+    damping=0.85,
+    residuals=None,
+    residual_threshold=None,
+    fidelity_signal="relative_l2",
+    min_length=1,
+    max_length=4,
+    indices=None,
+    indices_file=None,
+):
+    """Resolve target lengths for items in Phase 1.5 length-aware training.
+
+    Returns a dict mapping item_id (int) -> target_length (int) in [min_length, max_length].
+    """
+    if target_lengths is not None:
+        if isinstance(target_lengths, (str, Path)):
+            with Path(target_lengths).open(encoding="utf-8") as f:
+                data = json.load(f)
+            return resolve_target_lengths(
+                num_items,
+                target_lengths=data,
+                min_length=min_length,
+                max_length=max_length,
+            )
+        if isinstance(target_lengths, (list, tuple)):
+            return {
+                int(i): max(min_length, min(max_length, int(l)))
+                for i, l in enumerate(target_lengths)
+            }
+        if isinstance(target_lengths, dict):
+            first_val = next(iter(target_lengths.values())) if target_lengths else 4
+            result = {}
+            if isinstance(first_val, list):
+                for k, v in target_lengths.items():
+                    result[int(k)] = max(min_length, min(max_length, len(v)))
+            elif isinstance(first_val, (int, float)):
+                for k, v in target_lengths.items():
+                    result[int(k)] = max(min_length, min(max_length, int(v)))
+            elif isinstance(first_val, dict) and "length" in first_val:
+                for k, v in target_lengths.items():
+                    result[int(k)] = max(min_length, min(max_length, int(v["length"])))
+            else:
+                raise ValueError(f"Unsupported target_lengths value type: {type(first_val)}")
+            for i in range(num_items):
+                if i not in result:
+                    result[i] = max_length
+            return result
+        raise TypeError(f"target_lengths must be a path, dict, or list, got {type(target_lengths)}")
+
+    canonical_strat = strategy.lower().strip()
+    if canonical_strat in ("popularity", "collaborative"):
+        item_scores, item_frequencies = compute_interaction_signals(
+            inter_source=inter_source if inter_source is not None else {},
+            signal=collab_signal,
+            cf_emb_file=cf_emb_file,
+            top_k_cf=top_k_cf,
+            damping=damping,
+        )
+        ranking_scores = item_scores if item_scores is not None else item_frequencies
+        k_levels = max_length - min_length + 1
+        item_target_lens = {}
+        if k_levels <= 1 or not ranking_scores:
+            return {i: max_length for i in range(num_items)}
+
+        items = [str(i) for i in range(num_items)]
+        sorted_items = sorted(
+            items, key=lambda k: (float(ranking_scores.get(str(k), 0.0)), str(k))
+        )
+        raw_vals = [float(ranking_scores.get(str(k), 0.0)) for k in sorted_items]
+        min_val = min(raw_vals) if raw_vals else 0.0
+        offset = abs(min_val) if min_val < 0.0 else 0.0
+        adjusted_scores = {k: float(ranking_scores.get(str(k), 0.0)) + offset for k in sorted_items}
+        total_mass = sum(adjusted_scores.values())
+
+        if total_mass <= 0.0:
+            return {i: max_length for i in range(num_items)}
+
+        cum_mass = 0.0
+        for item_str in sorted_items:
+            cum_mass += adjusted_scores[item_str]
+            norm_cdf = min(1.0, max(0.0, cum_mass / total_mass))
+            tier = min(int(norm_cdf * k_levels), k_levels - 1)
+            item_target_lens[int(item_str)] = max_length - tier
+        return item_target_lens
+
+    if indices is None and indices_file is not None:
+        with Path(indices_file).open(encoding="utf-8") as f:
+            indices = json.load(f)
+
+    if canonical_strat in ("residual", "fidelity"):
+        if residuals is None:
+            raise ValueError(
+                f"strategy='{strategy}' requires 'residuals' or 'residuals_file' to be provided."
+            )
+        if isinstance(residuals, (str, Path)):
+            residuals = load_residuals(residuals)
+        threshold = residual_threshold if residual_threshold is not None else 0.2
+
+        if indices is not None:
+            _, lengths = truncate_indices(
+                indices,
+                min_length=min_length,
+                max_length=max_length,
+                strategy="residual",
+                residuals=residuals,
+                residual_threshold=threshold,
+            )
+            result = {int(k): int(v) for k, v in lengths.items()}
+        else:
+            result = {}
+            for i in range(num_items):
+                item_res = residuals.get(str(i), residuals.get(i))
+                chosen_len = max_length
+                if item_res is not None:
+                    for l in range(min_length, max_length):
+                        err = 1.0
+                        if isinstance(item_res, list) and len(item_res) >= l:
+                            err = item_res[l - 1]
+                        elif isinstance(item_res, dict):
+                            err = item_res.get(str(l), item_res.get(l, 1.0))
+                        if err <= threshold:
+                            chosen_len = l
+                            break
+                result[i] = chosen_len
+
+        for i in range(num_items):
+            if i not in result:
+                result[i] = max_length
+        return result
+
+    if canonical_strat in ("shortest_unique", "prefix"):
+        if indices is None:
+            raise ValueError(
+                f"strategy='{strategy}' requires 'indices' or 'indices_file' to be provided."
+            )
+        _, lengths = truncate_indices(
+            indices,
+            min_length=min_length,
+            max_length=max_length,
+            strategy="shortest_unique",
+        )
+        result = {int(k): int(v) for k, v in lengths.items()}
+        for i in range(num_items):
+            if i not in result:
+                result[i] = max_length
+        return result
+
+    raise ValueError(f"Unknown target length strategy: {strategy}")
+
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Truncate fixed-length LETTER IDs into collision-free variable-length IDs."

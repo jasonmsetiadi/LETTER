@@ -67,9 +67,23 @@ def parse_args():
         default='cuda:0',
         help='Device used to generate semantic IDs.',
     )
-
+    parser.add_argument(
+        '--phase',
+        type=float,
+        default=None,
+        help='Phase override (1.0 for fixed, 1.5 for length-aware). If None, reads from checkpoint.',
+    )
+    parser.add_argument(
+        '--target-lengths',
+        '--target_lengths',
+        type=str,
+        default=None,
+        dest='target_lengths',
+        help='Path to target lengths JSON or index file override for Phase 1.5.',
+    )
 
     return parser.parse_args()
+
 
 args_setting = parse_args()
 
@@ -143,41 +157,81 @@ def constrained_km(data, n_clusters=10):
     t_labels = torch.from_numpy(clf.labels_).tolist()
     return t_centers, t_labels
 
+ckpt_phase = float(ckpt.get("phase", get_arg("phase", 1.0)))
+if args_setting.phase is not None:
+    phase_mode = float(args_setting.phase)
+else:
+    phase_mode = ckpt_phase
+
+target_lengths = None
+if phase_mode == 1.5:
+    if args_setting.target_lengths:
+        from truncate_indices import resolve_target_lengths
+        target_lengths = resolve_target_lengths(len(data), target_lengths=args_setting.target_lengths)
+    elif ckpt.get("residual_threshold") is not None:
+        thresh = float(ckpt["residual_threshold"])
+        min_len = int(ckpt.get("min_length", 1))
+        print(f"[Phase 1.5] Recomputing item lengths in eval() mode using saved weights (residual_threshold={thresh}, min_length={min_len})...")
+        dynamic_lens = {}
+        with torch.no_grad():
+            for d in data_loader:
+                xs, e_idx = d[0].to(device), d[1]
+                _, d_lens = model.get_indices(
+                    xs, labels, residual_threshold=thresh, min_length=min_len, return_lengths=True
+                )
+                d_lens_list = d_lens.cpu().tolist() if hasattr(d_lens, "cpu") else list(d_lens)
+                e_idx_list = e_idx.cpu().tolist() if hasattr(e_idx, "cpu") else list(e_idx)
+                for it_id, it_len in zip(e_idx_list, d_lens_list):
+                    dynamic_lens[int(it_id)] = int(it_len)
+        target_lengths = dynamic_lens
+    else:
+        raw_lengths = ckpt.get("target_lengths", None)
+        if raw_lengths is not None and isinstance(raw_lengths, (list, tuple)):
+            target_lengths = {i: int(l) for i, l in enumerate(raw_lengths)}
+        elif raw_lengths is not None and isinstance(raw_lengths, dict):
+            target_lengths = {int(k): int(v) for k, v in raw_lengths.items()}
+
+    if target_lengths:
+        print(f"[Phase 1.5] Generating variable-length IDs with {len(target_lengths)} target lengths.")
+
 labels = {str(i): [] for i in range(len(model.rq.vq_layers))}
 if getattr(model, "beta", 0) > 0:
     embs  = [layer.embedding.weight.cpu().detach().numpy() for layer in model.rq.vq_layers]
     for idx, emb in enumerate(embs):
         centers, label = constrained_km(emb)
         labels[str(idx)] = label
+
+current_item = 0
 for d in tqdm(data_loader):
     d, emb_idx = d[0], d[1]
     d = d.to(device)
     
-    # indices = model.get_indices(d, use_sk=False)
-    indices = model.get_indices(d, labels,use_sk=False)
-
+    indices = model.get_indices(d, labels, use_sk=False)
     indices = indices.view(-1, indices.shape[-1]).cpu().numpy()
-    for index in indices:
+    emb_idx_np = emb_idx.cpu().numpy() if hasattr(emb_idx, "cpu") else np.array(emb_idx)
+    for j, index in enumerate(indices):
+        item_id = int(emb_idx_np[j]) if j < len(emb_idx_np) else current_item
         code = []
         for i, ind in enumerate(index):
             code.append(prefix[i].format(int(ind)))
 
+        if target_lengths is not None:
+            k_len = int(target_lengths.get(item_id, target_lengths.get(str(item_id), len(code))))
+            code = code[:k_len]
+
         all_indices.append(code)
         all_indices_str.append(str(code))
-    # break
+        current_item += 1
 
-all_indices = np.array(all_indices)
+all_indices = np.array(all_indices, dtype=object)
 all_indices_str = np.array(all_indices_str)
 
 for vq in model.rq.vq_layers[:-1]:
     vq.sk_epsilon=0.0
-# model.rq.vq_layers[-1].sk_epsilon = 0.005
 if model.rq.vq_layers[-1].sk_epsilon == 0.0:
     model.rq.vq_layers[-1].sk_epsilon = 0.003
 
-# model.rq.vq_layers[-1].sk_epsilon = 0.1
 tt = 0
-#There are often duplicate items in the dataset, and we no longer differentiate them
 while True:
     if tt >= 20 or check_collision(all_indices_str):
         break
@@ -189,13 +243,15 @@ while True:
         d = data[collision_items]
         d = d[0].to(device)
         indices = model.get_indices(d, labels, use_sk=True)
-
-        # indices = model.get_indices(d, use_sk=True)
         indices = indices.view(-1, indices.shape[-1]).cpu().numpy()
         for item, index in zip(collision_items, indices):
             code = []
             for i, ind in enumerate(index):
                 code.append(prefix[i].format(int(ind)))
+
+            if target_lengths is not None:
+                k_len = int(target_lengths.get(item, target_lengths.get(str(item), len(code))))
+                code = code[:k_len]
 
             all_indices[item] = code
             all_indices_str[item] = str(code)
@@ -213,11 +269,29 @@ all_indices_dict = {}
 for item, indices in enumerate(all_indices.tolist()):
     all_indices_dict[item] = list(indices)
 
-
-
 out_dir = os.path.dirname(output_file)
 if out_dir:
     os.makedirs(out_dir, exist_ok=True)
 
-with open(output_file, 'w') as fp:
-    json.dump(all_indices_dict,fp)
+with open(output_file, 'w', encoding='utf-8') as fp:
+    json.dump(all_indices_dict, fp)
+
+summary_file = os.path.splitext(output_file)[0] + ".summary.json"
+from collections import Counter
+length_distribution = dict(sorted(Counter(len(v) for v in all_indices_dict.values()).items()))
+summary_payload = {
+    "output": str(output_file),
+    "phase": phase_mode,
+    "items": len(all_indices_dict),
+    "min_length": min(len(v) for v in all_indices_dict.values()),
+    "max_length": max(len(v) for v in all_indices_dict.values()),
+    "mean_length": sum(len(v) for v in all_indices_dict.values()) / len(all_indices_dict),
+    "length_distribution": length_distribution,
+    "unique_ids": tot_indice,
+    "collisions": tot_item - tot_indice,
+}
+with open(summary_file, 'w', encoding='utf-8') as sf:
+    json.dump(summary_payload, sf, indent=2)
+print(f"Saved {len(all_indices_dict)} IDs (phase {phase_mode}) to {output_file}")
+print(f"Saved index summary to {summary_file}")
+

@@ -1,6 +1,6 @@
 # Variable-Length Semantic IDs: Research Roadmap & Architectural Phases
 
-This document outlines the end-to-end research roadmap for **Variable-Length Semantic IDs (SIDs)** in generative recommender systems (LETTER, TIGER, LC-Rec). It details the progression from **Phase 1: Post-Hoc Truncation** (heuristic / decoupled) to **Phase 2: Native Variable-Length Quantization** (quantizer-aware / coupled), and ultimately **Phase 3: Decoder Co-Design**.
+This document outlines the end-to-end research roadmap for **Variable-Length Semantic IDs (SIDs)** in generative recommender systems (LETTER, TIGER, LC-Rec). It details the progression from **Phase 1: Post-Hoc Truncation** (heuristic / decoupled) through **Phase 1.5: Length-Aware Training** (loss on the truncated prefix, external stop rule) to **Phase 2: Native Variable-Length Quantization** (stop decision learned / coupled), and ultimately **Phase 3: Decoder Co-Design**.
 
 ---
 
@@ -8,33 +8,55 @@ This document outlines the end-to-end research roadmap for **Variable-Length Sem
 
 Generative recommenders autoregressively generate item Semantic IDs token-by-token. Fixed-length IDs ($L=4$) force uniform decoding steps on all items, creating high inference latency and memory overhead. Variable-length SIDs compress average sequence length by allocating fewer tokens where possible.
 
-The research evolves across three distinct phases:
+The research evolves across four phases:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                        PHASE 1: Post-Hoc Truncation (Decoupled)                        │
-│  - Train standard fixed-length RQ-VAE (L=4)                                            │
+│ PHASE 1: Post-Hoc Truncation (Decoupled)                                               │
+│  - Train standard fixed-length RQ-VAE (L=4), loss at full depth only                   │
 │  - Truncate codes post-hoc via tree sparsity, popularity quantiles, or residual bounds │
 │  - Primary Goal: Benchmark empirical limits without modifying the quantizer            │
 └──────────────────────────────────────────┬─────────────────────────────────────────────┘
-                                           │
                                            ▼
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                   PHASE 2: Native Variable Quantization (Coupled / M-RQ-VAE)            │
-│  - Redesign quantizer training to natively produce variable-length IDs                 │
-│  - 4 Design Families: Matryoshka RQ-VAE, Learned Dynamic Halting (ACT),                 │
-│    Rate-Distortion VQ (EC-RQ-VAE), and Asymmetric Tree-Structured VQ (Tree-VQ)         │
-│  - Primary Goal: Eliminate the intermediate code gap; make short prefixes high-fidelity │
+│ PHASE 1.5: Length-Aware Training (Coupled loss, external stop rule)                    │
+│  - Run one Phase 1 rule (fidelity / prefix / Huffman) INSIDE the training loop         │
+│  - Recon / codebook losses computed only up to each item's stopping depth k(x)         │
+│  - Stop rule is a hard threshold or precomputed label: it receives no gradient         │
+│  - Primary Goal: Isolate the effect of training-time coupling with the rule held fixed │
 └──────────────────────────────────────────┬─────────────────────────────────────────────┘
-                                           │
                                            ▼
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                    PHASE 3: Recommender & Decoder Co-Design (End-to-End)               │
+│ PHASE 2: Native Variable Quantization (Learned stop decision)                          │
+│  - Stop decision is optimized by gradient against fidelity and rate                    │
+│  - 4 Design Families: Matryoshka RQ-VAE, Learned Dynamic Halting (ACT),                │
+│    Rate-Distortion VQ (EC-RQ-VAE), and Asymmetric Tree-Structured VQ (Tree-VQ)         │
+│  - Primary Goal: Eliminate the intermediate code gap; make short prefixes high-fidelity│
+└──────────────────────────────────────────┬─────────────────────────────────────────────┘
+                                           ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 3: Recommender & Decoder Co-Design (End-to-End)                                  │
 │  - Length-calibrated beam search and adaptive Trie constraints                         │
 │  - Early-exit decoding with confidence thresholds in TIGER / LC-Rec                    │
 │  - Primary Goal: Joint optimization of token decoding latency and recommendation NDCG  │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Phase Definition Test
+
+Two questions separate the phases:
+
+- **(a)** Is the quantizer loss computed on the truncated prefix (not only at full depth)?
+- **(b)** Is the stop decision itself optimized by gradient (against reconstruction and a rate term)?
+
+| Phase | (a) Loss on truncated prefix | (b) Stop decision trained |
+| :--- | :---: | :---: |
+| Phase 1 | No | No |
+| Phase 1.5 | Yes | No |
+| Phase 2 | Yes | Yes |
+
+Phase 3 is orthogonal: it leaves the quantizer unchanged and modifies decoding.
+
 
 ---
 
@@ -79,11 +101,59 @@ $$\mathcal{L}_{\text{CF}} = -\log \frac{\exp(\langle \hat{x}_4, e_{\text{CF}} \r
 Notice that $\mathcal{L}_{\text{CF}}$ is evaluated **only on the 4-layer representation $\hat{x}_4$**. 
 When an item is truncated to length 2 ($c_1, c_2$), **its collaborative alignment is discarded**, depriving the downstream recommender of critical collaborative filtering signals.
 
+### Status in the Literature
+No surveyed variable-length SID paper is pure Phase 1 (fixed-length training followed by post-hoc truncation), and none reports a post-hoc truncation control at matched average length. This baseline is therefore missing from the literature and is what Milestone 1 provides. Each Phase 1 strategy (residual-fidelity, shortest unique prefix, Huffman) reappears in Phase 1.5 as an in-training rule.
+
+---
+
+## 2.5 Phase 1.5: Length-Aware Training (Coupled Loss, External Stop Rule)
+
+*Phase 1.5 is a category introduced in this roadmap, not a term from the surveyed papers.*
+
+### Architectural Paradigm
+Phase 1.5 sits between Phase 1 and Phase 2. The quantizer is trained with a loss that depends on each item's length, but the length itself is still decided by a fixed rule:
+1. **Stop rule**: One of Phase 1's three rules (residual fidelity, prefix/subtree size, popularity) determines a stopping depth $k(x)$ for each item, as a hard threshold or a precomputed label.
+2. **Length-conditioned loss**: Reconstruction (and codebook/commitment) terms are summed only up to $k(x)$:
+$$\mathcal{L}_{\text{recon}}^{(k(x))} = \left\| z - \sum_{l=1}^{k(x)} q_l \right\|_2^2$$
+3. **No gradient to the stop decision**: Nothing trains the threshold or the labels. If the rule stops too early, only the codebooks can compensate.
+
+### Signal Taxonomy
+| Signal | Question it asks | Stop rule | Literature example |
+| :--- | :--- | :--- | :--- |
+| **Fidelity** | Does the code explain the item? | Residual norm $\le \epsilon$ or routing confidence $\ge \tau$ | CapsID |
+| **Prefix** | Is the item already identified? | Items under the current prefix $\le \tau$ (relaxed shortest unique prefix) | SA2CRQ |
+| **Huffman** | How often is the item needed? | Popularity-rank quantile; a classifier may learn to imitate the labels | VarLenRec |
+
+The surveyed papers also disagree on direction. VarLenRec gives popular items short IDs. SA2CRQ stops sparse paths early, and ADA-SID gives popular items more slots. Direction should be an explicit ablation.
+
+### Limitations of Phase 1.5
+1. **Untrained stop decision**: The stop signal gets no reconstruction gradient. A badly set threshold cannot be corrected by training.
+2. **Single-depth supervision**: Each item is supervised at one stopping depth, not at all prefixes as in Matryoshka (Family A) or dVAE.
+3. **Collaborative alignment**: $\mathcal{L}_{\text{CF}}$ is absent at truncated depths in all surveyed papers unless explicitly added at $k(x)$.
+4. **Partial conditioning**: Some designs condition only part of the loss on length (e.g., VarLenRec supervises reconstruction at the target length but sums the quantization loss over all $K$ layers).
+
+### Verification Flags
+The following classifications follow each paper's equations and have not been checked against code:
+- **CapsID**: Phase 1.5 only if training runs early-stopped forward passes. If training runs all $L_{\max}$ layers and stops only when emitting IDs, it is Phase 1.
+- **SA2CRQ**: Phase 1.5 only if the path statistics are computed online. If they come from a fixed-depth pass, the stop rule is effectively Phase 1. The paper's head-item stage also mostly reaches full depth, and its stage-2 anchor codebooks are frozen, so the amount of truncation-aware training is unverified.
+- **VarLenRec**: It is unclear whether reconstruction uses the target length $\hat{L}$ or the predictor's output.
+
+### Literature Summary
+| Paper | Phase | Signal | Loss on truncated prefix | Stop decision trained |
+| :--- | :--- | :--- | :--- | :--- |
+| CapsID | 1.5 (unverified) | Fidelity | Yes (inferred) | No, hard threshold |
+| SA2CRQ | 1.5 (unverified) | Prefix | Yes, per equations | No, hard threshold |
+| VarLenRec | 1.5 | Huffman | Reconstruction yes, quantization loss no | Classifier imitates fixed labels |
+| dVAE | 2 | Fidelity (rate-distortion) | All prefixes, weighted by $q(L)$ | Yes |
+| ADA-SID | Out of scope | Popularity proxy | Not prefix-based | Gated sparsity |
+
 ---
 
 ## 3. Phase 2: Native Variable-Length Quantization (The Quantizer Design Space)
 
-In Phase 2, the quantizer itself is trained from the ground up to support variable-length Semantic IDs. Rather than relying on a single concept, Phase 2 encompasses **four distinct architectural families**:
+In Phase 2, the length mechanism is part of the model: the stop decision is optimized by gradient against reconstruction fidelity and a rate (length) term, and the quantizer is supervised at every prefix it may be truncated to. Rather than relying on a single concept, Phase 2 encompasses **four distinct architectural families**:
+
+> **Note on Family A.** Matryoshka supervision satisfies test (a) at all depths, but on its own it does not train a stop decision (the comparison table lists "multi-depth supervision + threshold"). Family A is therefore Phase 2 on the supervision axis and Phase 1.5 on the stop axis unless it is paired with a learned stop mechanism (Family B or C), or with a threshold calibrated on the multi-depth losses.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
@@ -190,6 +260,7 @@ Rather than assigning lengths by static heuristics (popularity quantiles or arbi
   $$\mathcal{L} = \sum_{l=1}^L p_l \Big( \|x - \text{Decoder}(\hat{x}_l)\|^2 + \alpha \mathcal{L}_{\text{CF}}(\hat{x}_l) \Big) + \lambda_{\text{rate}} \cdot \mathbb{E}[N_{\text{steps}}(x)]$$
   where $p_l$ is the halting distribution and $\mathbb{E}[N_{\text{steps}}]$ is the expected token length.
 - **Key Advantage**: The network naturally learns the optimal rate-distortion trade-off: semantically distinct/simple items stop after 1 or 2 tokens, while complex/densely packed items continue to 4 tokens.
+- **Reference implementation (dVAE, Khrylchenko 2026)**: The closest existing instance of Families B and C. A per-step stop probability induces $q(L)$, reconstruction is weighted over all prefixes by $q(L=l)$, and the rate term is $\lambda\,\mathbb{E}[L] - H(q(L))$, all differentiable with no REINFORCE. It uses a shared vocabulary across positions and a causal transformer decoder, so it is **not** a drop-in replacement for standard RQ-VAE. It has no $\mathcal{L}_{\text{CF}}$ at any depth.
 
 ---
 
@@ -204,6 +275,7 @@ $$\min_{\theta, \mathcal{C}} \mathbb{E}_{x \sim \mathcal{D}} \Big[ \underbrace{\
   1. *Interaction-Weighted Token Cost*: $\mathcal{R} = l(x) \cdot \frac{f_x}{\sum_j f_j}$ (penalizes long IDs heavily if the item is frequently accessed by users).
   2. *Codebook Shannon Entropy*: $\mathcal{R} = -\sum_{c \in \mathcal{C}} P(c) \log P(c)$ (encourages high-probability semantic clusters to be shallow).
 - **Key Advantage**: Directly unifies Huffman coding theory and neural vector quantization into a single Lagrangian multiplier objective.
+- **Open gap**: No surveyed paper has tried an item-weighted rate term $\lambda \cdot f_x \cdot \mathbb{E}[L]$ inside a learned fidelity-based halting rule. dVAE uses a uniform $\lambda$ and VarLenRec uses popularity labels without any learned halting. Combining the two is a candidate contribution.
 
 ---
 
@@ -239,8 +311,11 @@ Tree-VQ replaces this with an **inherently asymmetric hierarchical tree codebook
 | :--- | :--- | :--- | :--- | :--- |
 | **Length Decision** | Multi-depth supervision + threshold | Learned gating unit $h_l$ | Lagrangian rate penalty $\lambda \mathcal{R}$ | Tree topology (leaf depth) |
 | **CF Loss ($\mathcal{L}_{\text{CF}}$)** | Explicit at all depths | Weighted by halting prob $p_l$ | Scaled by rate term | Evaluated at leaf nodes |
-| **Downstream Compatibility** | Drop-in replacement for standard RQ-VAE | Drop-in replacement | Drop-in replacement | Requires tree-routing encoder |
+| **Downstream Compatibility** | Drop-in replacement for standard RQ-VAE | Replaces the RQ-VAE quantizer; halting gate and rate term are added (the dVAE reference also changes the decoder and token embeddings) | Depends on the rate formulation | Requires tree-routing encoder |
 | **Primary Strength** | Simple, highly stable training | End-to-end learned lengths | Strong information-theory basis | Zero collision redundancy |
+
+### Out of Scope: Parallel-Slot Designs
+Designs without residual levels, such as ADA-SID (parallel shared/text/vision/behavior experts with separate codebooks and a ReLU-gated behavioral router), have no prefix structure, so none of Phases 1 to 3 applies cleanly. Dropped slots become padding tokens, so the sequence may not shorten. Its popularity-gated alignment weight is still relevant to Variant A.3 (frequency-gated loss).
 
 ---
 

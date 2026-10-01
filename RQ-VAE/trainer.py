@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader
 
 class Trainer(object):
 
-    def __init__(self, args, model):
+    def __init__(self, args, model, target_lengths=None):
         self.args = args
         self.model = model
         self.logger = logging.getLogger()
@@ -36,10 +36,45 @@ class Trainer(object):
         self.best_collision_rate = np.inf
         self.best_loss_ckpt = "best_loss_model.pth"
         self.best_collision_ckpt = "best_collision_model.pth"
+
+        self.phase = float(getattr(args, "phase", 1.0))
+        self.target_length_strategy = getattr(args, "target_length_strategy", "popularity")
+        self.min_length = getattr(args, "min_length", 1)
+        self.online_residual = (
+            self.phase == 1.5
+            and self.target_length_strategy in ("residual", "fidelity")
+            and target_lengths is None
+        )
+        if self.online_residual:
+            self.residual_threshold = getattr(args, "residual_threshold", None)
+            if self.residual_threshold is None:
+                self.residual_threshold = 0.2
+        else:
+            self.residual_threshold = None
+
+        self.catalog_lengths = None
+        self.target_lengths = None
+        if target_lengths is not None:
+            if isinstance(target_lengths, dict):
+                max_idx = max(int(k) for k in target_lengths.keys())
+                lengths_list = [
+                    int(target_lengths.get(i, target_lengths.get(str(i), len(self.model.rq.vq_layers))))
+                    for i in range(max_idx + 1)
+                ]
+                self.target_lengths = torch.tensor(lengths_list, dtype=torch.long, device=self.device)
+            elif isinstance(target_lengths, (list, tuple)) or type(target_lengths).__name__ == "ndarray":
+                self.target_lengths = torch.tensor(list(target_lengths), dtype=torch.long, device=self.device)
+            elif hasattr(target_lengths, "to"):
+                self.target_lengths = target_lengths.to(self.device).long()
+            else:
+                self.target_lengths = torch.tensor(list(target_lengths), dtype=torch.long, device=self.device)
+
+
         self.optimizer = self._build_optimizer()
         self.model = self.model.to(self.device)
         self.trained_loss = {"total":[],"rqvae":[],"recon":[],"cf":[]}
         self.valid_collision_rate = {"val":[]}
+
 
 
     def _build_optimizer(self):
@@ -142,7 +177,20 @@ class Trainer(object):
             data, emb_idx = data[0], data[1]
             data = data.to(self.device)
             self.optimizer.zero_grad()
-            out, rq_loss, indices, dense_out = self.model(data, self.labels)
+            lengths = None
+            if self.target_lengths is not None:
+                lengths = self.target_lengths[emb_idx.to(self.device)]
+            out, rq_loss, indices, dense_out, dyn_lengths = self.model(
+                data,
+                self.labels,
+                lengths=lengths,
+                residual_threshold=self.residual_threshold,
+                min_length=self.min_length,
+                return_lengths=True,
+            )
+
+            if self.online_residual and self.catalog_lengths is not None:
+                self.catalog_lengths[emb_idx.to(self.device)] = dyn_lengths
 
             loss, cf_loss, loss_recon, quant_loss = self.model.compute_loss(out, rq_loss, emb_idx, dense_out, xs=data)
             self._check_nan(loss)
@@ -153,6 +201,11 @@ class Trainer(object):
             total_recon_loss += loss_recon.item()
             total_cf_loss += (cf_loss.item() if hasattr(cf_loss, 'item') else (cf_loss if cf_loss != 0 else 0))
             total_quant_loss += quant_loss.item()
+
+        if self.online_residual and self.catalog_lengths is not None and hasattr(self.catalog_lengths, "cpu"):
+            from collections import Counter
+            len_dist = dict(sorted(Counter(self.catalog_lengths.cpu().tolist()).items()))
+            self.logger.info(f"[Phase 1.5 Online Residual] Epoch {epoch_idx} length distribution: {len_dist}")
 
         return total_loss, total_recon_loss, total_cf_loss, quant_loss.item()
 
@@ -182,8 +235,26 @@ class Trainer(object):
             data = data.to(self.device)
             indices = self.model.get_indices(data, self.labels)
             indices = indices.view(-1,indices.shape[-1]).cpu().numpy()
-            for index in indices:
-                code = "-".join([str(int(_)) for _ in index])
+            emb_idx_np = emb_idx.cpu().numpy() if hasattr(emb_idx, "cpu") else np.array(emb_idx)
+            for j, index in enumerate(indices):
+                if self.target_lengths is not None:
+                    item_id = int(emb_idx_np[j])
+                    k_len = int(
+                        self.target_lengths[item_id].item()
+                        if hasattr(self.target_lengths[item_id], "item")
+                        else self.target_lengths[item_id]
+                    )
+                    code = "-".join([str(int(_)) for _ in index[:k_len]])
+                elif self.online_residual and self.catalog_lengths is not None:
+                    item_id = int(emb_idx_np[j])
+                    k_len = int(
+                        self.catalog_lengths[item_id].item()
+                        if hasattr(self.catalog_lengths[item_id], "item")
+                        else self.catalog_lengths[item_id]
+                    )
+                    code = "-".join([str(int(_)) for _ in index[:k_len]])
+                else:
+                    code = "-".join([str(int(_)) for _ in index])
                 indices_set.add(code)
 
         collision_rate = (num_sample - len(indices_set))/num_sample
@@ -197,9 +268,21 @@ class Trainer(object):
 
         ckpt_path = os.path.join(self.ckpt_dir,ckpt_file) if ckpt_file \
             else os.path.join(self.ckpt_dir, 'epoch_%d_collision_%.4f_model.pth' % (epoch, collision_rate))
+        target_lengths_data = None
+        if self.target_lengths is not None and hasattr(self.target_lengths, "cpu"):
+            target_lengths_data = self.target_lengths.cpu().tolist()
+        elif self.online_residual and self.catalog_lengths is not None and hasattr(self.catalog_lengths, "cpu"):
+            target_lengths_data = self.catalog_lengths.cpu().tolist()
+        elif self.target_lengths is not None:
+            target_lengths_data = list(self.target_lengths)
+
         state = {
             "args": self.args,
             "epoch": epoch,
+            "phase": self.phase,
+            "target_lengths": target_lengths_data,
+            "residual_threshold": self.residual_threshold,
+            "min_length": self.min_length,
             "best_loss": self.best_loss,
             "best_collision_rate": self.best_collision_rate,
             "state_dict": self.model.state_dict(),
@@ -210,6 +293,7 @@ class Trainer(object):
         self.logger.info(
             set_color("Saving current", "blue") + f": {ckpt_path}"
         )
+
 
     def _generate_train_loss_output(self, epoch_idx, s_time, e_time, loss, recon_loss, cf_loss):
         train_loss_output = (
@@ -228,6 +312,11 @@ class Trainer(object):
     def fit(self, data):
 
         cur_eval_step = 0
+        if self.online_residual and self.catalog_lengths is None:
+            num_items = len(data.dataset) if hasattr(data, "dataset") else len(data)
+            num_layers = len(self.model.rq.vq_layers)
+            if hasattr(torch, "full"):
+                self.catalog_lengths = torch.full((num_items,), num_layers, dtype=torch.long, device=self.device)
         self.vq_init()
         for epoch_idx in range(self.epochs):
             # train

@@ -153,7 +153,7 @@ class VectorQuantizer(nn.Module):
 
         return x_q
     
-    def forward(self,  x, label, idx, use_sk=True):
+    def forward(self,  x, label, idx, active_mask=None, use_sk=True):
         # Flatten input
         latent = x.view(-1, self.e_dim)
 
@@ -170,7 +170,12 @@ class VectorQuantizer(nn.Module):
         else:    
         # Calculate Cosine Similarity 
             d = latent@self.embedding.weight.t()
-        if not use_sk or self.sk_epsilon <= 0:
+        active_count = (
+            int(active_mask.sum().item())
+            if (active_mask is not None and hasattr(active_mask, "sum") and hasattr(active_mask.sum(), "item"))
+            else (int(active_mask.sum()) if active_mask is not None and hasattr(active_mask, "sum") else latent.shape[0])
+        )
+        if not use_sk or self.sk_epsilon <= 0 or active_count < self.n_e or active_count == 0:
             if _distance_flag == 'distance':
                 if idx != -1:
                     indices = torch.argmin(d, dim=-1)
@@ -194,16 +199,30 @@ class VectorQuantizer(nn.Module):
 
         x_q = self.embedding(indices).view(x.shape)
 
-        # Diversity
-        if self.beta > 0 and label is not None and len(label) > 0:
-            diversity_loss = self.diversity_loss_main_entry(x, x_q, indices, label)
+        # compute loss for embedding (taking active_mask into account for Phase 1.5 length-aware training)
+        if active_mask is not None and not (hasattr(active_mask, "all") and active_mask.all()):
+            if hasattr(active_mask, "any") and active_mask.any():
+                act_x_q = x_q[active_mask]
+                act_x = x[active_mask]
+                commitment_loss = F.mse_loss(act_x_q.detach(), act_x)
+                codebook_loss = F.mse_loss(act_x_q, act_x.detach())
+                if self.beta > 0 and label is not None and len(label) > 0 and len(act_x) > 1:
+                    diversity_loss = self.diversity_loss_main_entry(act_x, act_x_q, indices[active_mask], label)
+                else:
+                    diversity_loss = torch.tensor(0.0, device=x.device) if hasattr(torch, "tensor") else 0.0
+            else:
+                commitment_loss = torch.tensor(0.0, device=x.device) if hasattr(torch, "tensor") else 0.0
+                codebook_loss = torch.tensor(0.0, device=x.device) if hasattr(torch, "tensor") else 0.0
+                diversity_loss = torch.tensor(0.0, device=x.device) if hasattr(torch, "tensor") else 0.0
         else:
-            diversity_loss = torch.tensor(0.0, device=x.device)
-        # wandb.log({'diversity_loss': diversity_loss})
+            # Diversity
+            if self.beta > 0 and label is not None and len(label) > 0:
+                diversity_loss = self.diversity_loss_main_entry(x, x_q, indices, label)
+            else:
+                diversity_loss = torch.tensor(0.0, device=x.device)
 
-        # compute loss for embedding
-        commitment_loss = F.mse_loss(x_q.detach(), x)
-        codebook_loss = F.mse_loss(x_q, x.detach())
+            commitment_loss = F.mse_loss(x_q.detach(), x)
+            codebook_loss = F.mse_loss(x_q, x.detach())
 
         loss = codebook_loss + self.mu * commitment_loss + self.beta * diversity_loss
 
@@ -214,3 +233,4 @@ class VectorQuantizer(nn.Module):
         indices = indices.view(x.shape[:-1])
 
         return x_q, loss, indices
+

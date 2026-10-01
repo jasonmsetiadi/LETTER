@@ -49,24 +49,77 @@ class ResidualVectorQuantizer(nn.Module):
             residual = residual - x_res
             x_q = x_q + x_res
 
-    def forward(self, x, labels, use_sk=True):
+    def forward(
+        self,
+        x,
+        labels,
+        lengths=None,
+        residual_threshold=None,
+        min_length=1,
+        use_sk=True,
+        return_lengths=False,
+    ):
         all_losses = []
         all_indices = []
 
         x_q = 0
         residual = x
+        bsz = x.size(0) if hasattr(x, "size") else (len(x) if isinstance(x, (list, tuple)) else 1)
+        num_layers = len(self.vq_layers)
+
+        online_residual = residual_threshold is not None and lengths is None
+        if online_residual:
+            if hasattr(torch, "ones") and hasattr(x, "device"):
+                active_mask = torch.ones(bsz, dtype=torch.bool, device=x.device)
+                dyn_lengths = torch.full((bsz,), num_layers, dtype=torch.long, device=x.device)
+                norm_x = torch.norm(x, p=2, dim=-1).clamp(min=1e-8) if hasattr(torch, "norm") else 1.0
+            else:
+                active_mask = None
+                dyn_lengths = None
+                norm_x = 1.0
 
         for idx, quantizer in enumerate(self.vq_layers):
             label = labels[str(idx)]
-            
-            x_res, loss, indices = quantizer(residual,label, idx, use_sk=use_sk)
-            residual = residual - x_res
-            x_q = x_q + x_res
+            depth = idx + 1
 
-            all_losses.append(loss)
+            if lengths is not None:
+                active_mask = (lengths >= depth)
+                x_res, loss, indices = quantizer(residual, label, idx, active_mask=active_mask, use_sk=use_sk)
+                layer_active = active_mask.float().unsqueeze(-1) if hasattr(active_mask, "float") else active_mask
+                residual = residual - x_res * layer_active
+                x_q = x_q + x_res * layer_active
+                if hasattr(active_mask, "any") and active_mask.any():
+                    all_losses.append(loss)
+            elif online_residual and active_mask is not None:
+                x_res, loss, indices = quantizer(residual, label, idx, active_mask=active_mask, use_sk=use_sk)
+                layer_active = active_mask.float().unsqueeze(-1) if hasattr(active_mask, "float") else active_mask
+                residual = residual - x_res * layer_active
+                x_q = x_q + x_res * layer_active
+                if hasattr(active_mask, "any") and active_mask.any():
+                    all_losses.append(loss)
+
+                # Online fidelity stopping check after depth
+                if hasattr(torch, "no_grad") and hasattr(torch, "norm"):
+                    with torch.no_grad():
+                        rel_err = torch.norm(residual, p=2, dim=-1) / norm_x
+                        halt_now = active_mask & (rel_err <= residual_threshold) & (depth >= min_length)
+                        dyn_lengths[halt_now] = depth
+                        active_mask = active_mask & (~halt_now)
+            else:
+                x_res, loss, indices = quantizer(residual, label, idx, use_sk=use_sk)
+                residual = residual - x_res
+                x_q = x_q + x_res
+                all_losses.append(loss)
+
             all_indices.append(indices)
 
-        mean_losses = torch.stack(all_losses).mean()
-        all_indices = torch.stack(all_indices, dim=-1)
+        mean_losses = torch.stack(all_losses).mean() if all_losses and hasattr(torch, "stack") else (
+            torch.tensor(0.0, device=x.device) if hasattr(torch, "tensor") and hasattr(x, "device") else 0.0
+        )
+        all_indices = torch.stack(all_indices, dim=-1) if hasattr(torch, "stack") else all_indices
+
+        if return_lengths:
+            res_lengths = dyn_lengths if online_residual else lengths
+            return x_q, mean_losses, all_indices, res_lengths
 
         return x_q, mean_losses, all_indices

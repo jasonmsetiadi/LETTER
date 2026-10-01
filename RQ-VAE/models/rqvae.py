@@ -66,12 +66,34 @@ class RQVAE(nn.Module):
         self.decoder = MLPLayers(layers=self.decode_layer_dims,
                                        dropout=self.dropout_prob,bn=self.bn)
 
-    def forward(self, x, labels, use_sk=True):
+    def forward(
+        self,
+        x,
+        labels,
+        lengths=None,
+        residual_threshold=None,
+        min_length=1,
+        use_sk=True,
+        return_lengths=False,
+    ):
         x = self.encoder(x)
-        x_q, rq_loss, indices = self.rq(x,labels, use_sk=use_sk)
-        out = self.decoder(x_q)
-
-        return out, rq_loss, indices, x_q
+        rq_out = self.rq(
+            x,
+            labels,
+            lengths=lengths,
+            residual_threshold=residual_threshold,
+            min_length=min_length,
+            use_sk=use_sk,
+            return_lengths=return_lengths,
+        )
+        if return_lengths:
+            x_q, rq_loss, indices, dyn_lengths = rq_out
+            out = self.decoder(x_q)
+            return out, rq_loss, indices, x_q, dyn_lengths
+        else:
+            x_q, rq_loss, indices = rq_out
+            out = self.decoder(x_q)
+            return out, rq_loss, indices, x_q
     
     def CF_loss(self, quantized_rep, encoded_rep):
         batch_size = quantized_rep.size(0)
@@ -84,10 +106,29 @@ class RQVAE(nn.Module):
         self.rq.vq_ini(self.encoder(x))
 
     @torch.no_grad()
-    def get_indices(self, xs, labels, use_sk=False):
+    def get_indices(
+        self,
+        xs,
+        labels,
+        lengths=None,
+        residual_threshold=None,
+        min_length=1,
+        use_sk=False,
+        return_lengths=False,
+    ):
         x_e = self.encoder(xs)
-        _, _, indices = self.rq(x_e, labels, use_sk=use_sk)
-        return indices
+        rq_out = self.rq(
+            x_e,
+            labels,
+            lengths=lengths,
+            residual_threshold=residual_threshold,
+            min_length=min_length,
+            use_sk=use_sk,
+            return_lengths=return_lengths,
+        )
+        if return_lengths:
+            return rq_out[2], rq_out[3]
+        return rq_out[2]
 
     def compute_loss(self, out, quant_loss, emb_idx, dense_out, xs=None):
 
@@ -101,7 +142,7 @@ class RQVAE(nn.Module):
         rqvae_n_diversity_loss = loss_recon + self.quant_loss_weight * quant_loss
 
         # CF_Loss
-        if self.alpha > 0 and self.cf_embedding is not None:
+        if self.alpha > 0 and self.cf_embedding is not None and not (isinstance(self.cf_embedding, int) and self.cf_embedding == 0):
             cf_embedding_in_batch = self.cf_embedding[emb_idx]
             cf_embedding_in_batch = torch.from_numpy(cf_embedding_in_batch).to(dense_out.device)
             cf_loss = self.CF_loss(dense_out, cf_embedding_in_batch)
