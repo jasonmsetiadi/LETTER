@@ -50,6 +50,11 @@ def generate_item_embedding(args, item_text_list, tokenizer, model, word_drop_ra
     print(f'Generate Text Embedding: ')
     print(' Dataset: ', args.dataset)
 
+    model_max_pos = getattr(model.config, 'max_position_embeddings', None)
+    if model_max_pos is not None and args.max_sent_len > model_max_pos:
+        print(f'Warning: max_sent_len ({args.max_sent_len}) exceeds model max_position_embeddings ({model_max_pos}). Clamping to {model_max_pos}.')
+        args.max_sent_len = model_max_pos
+
     items, texts = zip(*item_text_list)
     order_texts = [[0]] * len(items)
     for item, text in zip(items, texts):
@@ -110,10 +115,10 @@ def parse_args():
     parser.add_argument('--dataset', type=str, default='Instruments', help='Instruments / Arts / Games')
     parser.add_argument('--root', type=str, default="")
     parser.add_argument('--gpu_id', type=int, default=2, help='ID of running GPU')
-    parser.add_argument('--plm_name', type=str, default='llama')
+    parser.add_argument('--plm_name', type=str, default='bert-base-uncased')
     parser.add_argument('--plm_checkpoint', type=str,
-                        default='')
-    parser.add_argument('--max_sent_len', type=int, default=2048)
+                        default='bert-base-uncased')
+    parser.add_argument('--max_sent_len', type=int, default=512)
     parser.add_argument('--word_drop_ratio', type=float, default=-1, help='word drop ratio, do not drop by default')
     return parser.parse_args()
 
@@ -127,7 +132,8 @@ if __name__ == '__main__':
 
     item_text_list = preprocess_text(args)
 
-    plm_tokenizer, plm_model = load_plm(args.plm_checkpoint)
+    checkpoint = args.plm_checkpoint if args.plm_checkpoint else 'bert-base-uncased'
+    plm_tokenizer, plm_model = load_plm(checkpoint)
     if plm_tokenizer.pad_token_id is None:
         plm_tokenizer.pad_token_id = 0
     plm_model = plm_model.to(device)

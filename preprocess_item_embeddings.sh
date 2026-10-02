@@ -23,7 +23,7 @@ DATASET=""
 PLM_CHECKPOINT="bert-base-uncased"
 PLM_NAME="bert-base-uncased"
 GPU_ID="0"
-MAX_SENT_LEN="2048"
+MAX_SENT_LEN="512"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 OVERWRITE=false
 
