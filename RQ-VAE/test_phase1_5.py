@@ -819,8 +819,8 @@ class TestPhase15Reporting(unittest.TestCase):
 
         rd_data = {
             "fixed_curve": [
-                {"length": 2.0, "metrics": {"hit@10": 0.08, "ndcg@10": 0.06}, "status": "completed"},
-                {"length": 4.0, "metrics": {"hit@10": 0.10, "ndcg@10": 0.08}, "status": "completed"},
+                {"length": 2.0, "metrics": {"hit@5": 0.06, "hit@10": 0.08, "ndcg@5": 0.05, "ndcg@10": 0.06}, "status": "completed"},
+                {"length": 4.0, "metrics": {"hit@5": 0.08, "hit@10": 0.10, "ndcg@5": 0.07, "ndcg@10": 0.08}, "status": "completed"},
             ],
             "variable_bracketed": [
                 {
@@ -830,9 +830,9 @@ class TestPhase15Reporting(unittest.TestCase):
                     "weighted_length": 3.0,
                     "token_savings_pct": 25.0,
                     "status": "completed",
-                    "metrics": {"hit@10": 0.098, "ndcg@10": 0.078},
-                    "interp_metrics": {"hit@10": 0.090, "ndcg@10": 0.070},
-                    "delta_interp": {"hit@10": 8.9, "ndcg@10": 11.4},
+                    "metrics": {"hit@5": 0.078, "hit@10": 0.098, "ndcg@5": 0.068, "ndcg@10": 0.078},
+                    "interp_metrics": {"hit@5": 0.070, "hit@10": 0.090, "ndcg@5": 0.060, "ndcg@10": 0.070},
+                    "delta_interp": {"hit@5": 11.4, "hit@10": 8.9, "ndcg@5": 13.3, "ndcg@10": 11.4},
                     "pareto_status": "★ Dominant",
                 }
             ],
@@ -851,21 +851,21 @@ class TestPhase15Reporting(unittest.TestCase):
             self.assertTrue(res)
 
             # Verify 4-panel subplots created
-            mock_plt.subplots.assert_called_once_with(2, 2, figsize=(13, 10), dpi=300)
+            mock_plt.subplots.assert_called_once_with(2, 2, figsize=(12, 9.5), dpi=300)
 
-            # Verify Panel 1 & Panel 2 (NDCG@10 and Hit@10 plots)
+            # Verify Panel 1 & Panel 2 (Hit@10 and NDCG@10 frontier plots)
             self.assertTrue(mock_ax1.plot.called)
             self.assertTrue(mock_ax1.scatter.called)
             self.assertTrue(mock_ax2.plot.called)
             self.assertTrue(mock_ax2.scatter.called)
 
-            # Verify Panel 3 (Token Savings barh)
-            self.assertTrue(mock_ax3.barh.called)
-            self.assertTrue(mock_ax3.text.called)
-
-            # Verify Panel 4 (Rate-distortion surplus barh)
-            self.assertTrue(mock_ax4.barh.called)
-            self.assertTrue(mock_ax4.text.called)
+            # Verify Panel 3 & Panel 4 (Hit@5 and NDCG@5 frontier plots, no barh)
+            self.assertTrue(mock_ax3.plot.called)
+            self.assertTrue(mock_ax3.scatter.called)
+            self.assertTrue(mock_ax4.plot.called)
+            self.assertTrue(mock_ax4.scatter.called)
+            self.assertFalse(mock_ax3.barh.called)
+            self.assertFalse(mock_ax4.barh.called)
 
             # Verify savefig called with 300 dpi and tight layout
             mock_fig.savefig.assert_called_once_with(
@@ -914,14 +914,6 @@ class TestPhase15Reporting(unittest.TestCase):
                 ax.get_legend_handles_labels.return_value = ([], [])
             mock_plt.subplots.return_value = (mock_fig, [[mock_ax1, mock_ax2], [mock_ax3, mock_ax4]])
 
-            class MockRect:
-                def get_width(self): return 10.0
-                def get_y(self): return 0.0
-                def get_height(self): return 0.5
-
-            mock_ax3.barh.return_value = [MockRect()]
-            mock_ax4.barh.return_value = [MockRect()]
-
             def side_effect_savefig(path, **kwargs):
                 with open(path, "wb") as f:
                     f.write(b"fake_png_data")
@@ -945,18 +937,19 @@ class TestPhase15Reporting(unittest.TestCase):
                 with patch.dict("sys.modules", {"matplotlib": mock_matplotlib, "matplotlib.pyplot": mock_plt}):
                     mod.main()
 
-                plot_png = res_dir / f"strategy_comparison_{dataset}_phase1.5.png"
-                alias_png = res_dir / f"rate_distortion_frontier_{dataset}_phase1.5.png"
+                plot_png = res_dir / f"rate_distortion_frontier_{dataset}_phase1.5.png"
                 self.assertTrue(plot_png.exists())
-                self.assertTrue(alias_png.exists())
+                # Verify duplicate strategy_comparison file was eliminated
+                duplicate_png = res_dir / f"strategy_comparison_{dataset}_phase1.5.png"
+                self.assertFalse(duplicate_png.exists())
 
                 md_file = res_dir / f"strategy_comparison_phase1.5.md"
                 with open(md_file) as f:
                     md_text = f.read()
 
-                # Verify markdown embeds the strategy comparison plot
-                self.assertIn(f"![Strategy Comparison Plot]({plot_png.name})", md_text)
-                self.assertIn("### Performance & Rate-Distortion Overview", md_text)
+                # Verify markdown embeds the rate-distortion plot once in Section 3
+                self.assertIn(f"![Phase 1.5 Rate-Distortion Pareto Frontier]({plot_png.name})", md_text)
+                self.assertNotIn("### Performance & Rate-Distortion Overview", md_text)
 
             finally:
                 sys.argv = orig_argv
@@ -965,7 +958,6 @@ class TestPhase15Reporting(unittest.TestCase):
             orig_argv = sys.argv
             try:
                 if plot_png.exists(): plot_png.unlink()
-                if alias_png.exists(): alias_png.unlink()
 
                 sys.argv = [
                     "generate_comparison_report.py",
@@ -980,11 +972,114 @@ class TestPhase15Reporting(unittest.TestCase):
 
                 # Verify no plot was created
                 self.assertFalse(plot_png.exists())
-                self.assertFalse(alias_png.exists())
 
                 with open(md_file) as f:
                     md_text = f.read()
-                self.assertNotIn("![Strategy Comparison Plot]", md_text)
+                self.assertNotIn("![Phase 1.5 Rate-Distortion Pareto Frontier]", md_text)
+            finally:
+                sys.argv = orig_argv
+
+    def test_phase1_and_phase1_5_separate_plots_when_both_present(self):
+        from unittest.mock import MagicMock, patch
+        spec = importlib.util.spec_from_file_location(
+            "generate_comparison_report",
+            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            dataset = "SplitPlotDS"
+            data_dir = tmp_path / "data" / dataset
+            data_dir.mkdir(parents=True, exist_ok=True)
+            res_dir = tmp_path / "LETTER-TIGER" / "results" / dataset / "rqvae"
+            res_dir.mkdir(parents=True, exist_ok=True)
+
+            with open(data_dir / f"{dataset}.index.json", "w") as f:
+                json.dump({"0": [1, 2, 3, 4], "1": [2, 3, 4, 5]}, f)
+            with open(data_dir / f"{dataset}.inter.json", "w") as f:
+                json.dump({"0": [0, 1]}, f)
+
+            # Fixed baseline
+            with open(res_dir / "fixed_L2.json", "w") as f:
+                json.dump({"mean_results": {"hit@1": 0.03, "hit@5": 0.06, "hit@10": 0.08, "ndcg@5": 0.05, "ndcg@10": 0.06}}, f)
+            with open(res_dir / "fixed.json", "w") as f:
+                json.dump({"mean_results": {"hit@1": 0.05, "hit@5": 0.08, "hit@10": 0.10, "ndcg@5": 0.07, "ndcg@10": 0.08}}, f)
+
+            tok_dir = data_dir / "rqvae"
+            tok_dir.mkdir(parents=True, exist_ok=True)
+
+            # Phase 1 variable result
+            with open(tok_dir / f"{dataset}.index.varlen.res.json", "w") as f:
+                json.dump({"0": [1, 2], "1": [2, 3]}, f)
+            with open(res_dir / "varlen-res.json", "w") as f:
+                json.dump({"mean_results": {"hit@1": 0.040, "hit@5": 0.070, "hit@10": 0.090, "ndcg@5": 0.060, "ndcg@10": 0.070}}, f)
+
+            # Phase 1.5 variable result
+            with open(tok_dir / f"{dataset}.index.varlen.res-phase1.5.json", "w") as f:
+                json.dump({"0": [1, 2, 3], "1": [2, 3, 4]}, f)
+            with open(res_dir / "varlen-res_phase1.5.json", "w") as f:
+                json.dump({"mean_results": {"hit@1": 0.048, "hit@5": 0.078, "hit@10": 0.098, "ndcg@5": 0.068, "ndcg@10": 0.078}}, f)
+
+            mock_plt = MagicMock()
+            mock_fig = MagicMock()
+            mock_axes = [[MagicMock(), MagicMock()], [MagicMock(), MagicMock()]]
+            for row in mock_axes:
+                for ax in row:
+                    ax.get_legend_handles_labels.return_value = ([], [])
+            mock_plt.subplots.return_value = (mock_fig, mock_axes)
+
+            def side_effect_savefig(path, **kwargs):
+                with open(path, "wb") as f:
+                    f.write(b"fake_plot_data")
+
+            mock_fig.savefig.side_effect = side_effect_savefig
+
+            mock_matplotlib = MagicMock()
+            mock_matplotlib.pyplot = mock_plt
+
+            orig_argv = sys.argv
+            try:
+                sys.argv = [
+                    "generate_comparison_report.py",
+                    "--dataset", dataset,
+                    "--repo-root", str(tmp_path),
+                    "--phase", "both",
+                    "--tokenizer", "rqvae",
+                    "--strategies", "fixed,residual",
+                ]
+                with patch.dict("sys.modules", {"matplotlib": mock_matplotlib, "matplotlib.pyplot": mock_plt}):
+                    mod.main()
+
+                p1_png = res_dir / f"rate_distortion_frontier_{dataset}_phase1.png"
+                p15_png = res_dir / f"rate_distortion_frontier_{dataset}_phase1.5.png"
+
+                # Both separate phase plots exist
+                self.assertTrue(p1_png.exists())
+                self.assertTrue(p15_png.exists())
+
+                # No duplicate alias copy created
+                self.assertFalse((res_dir / f"strategy_comparison_{dataset}.png").exists())
+                self.assertFalse((res_dir / f"strategy_comparison_{dataset}_phase1.png").exists())
+                self.assertFalse((res_dir / f"rate_distortion_frontier_{dataset}.png").exists())
+
+                # Check markdown report
+                md_file = res_dir / f"strategy_comparison.md"
+                with open(md_file) as f:
+                    md_text = f.read()
+
+                self.assertIn(f"#### Phase 1 Rate-Distortion Pareto Frontier\n\n![Phase 1 Rate-Distortion Pareto Frontier]({p1_png.name})", md_text)
+                self.assertIn(f"#### Phase 1.5 Rate-Distortion Pareto Frontier\n\n![Phase 1.5 Rate-Distortion Pareto Frontier]({p15_png.name})", md_text)
+                self.assertNotIn("### Performance & Rate-Distortion Overview", md_text)
+
+                # Check JSON output
+                json_file = res_dir / f"strategy_comparison.json"
+                with open(json_file) as f:
+                    jdata = json.load(f)
+                self.assertIn(p1_png.name, jdata.get("plot_files", []))
+                self.assertIn(p15_png.name, jdata.get("plot_files", []))
+
             finally:
                 sys.argv = orig_argv
 

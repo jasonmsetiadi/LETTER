@@ -465,15 +465,17 @@ def compute_rate_distortion_frontier(recom_table_data, max_length=4):
     }
 
 
-def generate_comparison_plot(
+def generate_rate_distortion_plot(
     rd_data,
     dataset,
     model_name,
     out_png_path,
-    h2h_data=None,
+    phase=None,
     max_length=4,
+    h2h_data=None,
+    **kwargs,
 ):
-    """Generate a 4-panel publication-quality Strategy Comparison & Rate-Distortion plot."""
+    """Generate a 4-panel publication-quality Rate-Distortion Pareto Frontier plot (Hit@5, Hit@10, NDCG@5, NDCG@10)."""
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -483,14 +485,20 @@ def generate_comparison_plot(
         return False
 
     fixed_curve = rd_data.get("fixed_curve", [])
-    var_list = rd_data.get("variable_bracketed", [])
+    all_var_list = rd_data.get("variable_bracketed", [])
+
+    # Filter variable strategies by phase if specified
+    if phase is not None:
+        var_list = [v for v in all_var_list if str(v.get("phase")) == str(phase)]
+    else:
+        var_list = all_var_list
 
     has_var_data = any(v.get("status") == "completed" for v in var_list)
     has_fixed_data = any(f.get("status") == "completed" for f in fixed_curve)
     if not has_fixed_data and not has_var_data:
         return False
 
-    fig, axes = plt.subplots(2, 2, figsize=(13, 10), dpi=300)
+    fig, axes = plt.subplots(2, 2, figsize=(12, 9.5), dpi=300)
     try:
         ax1, ax2 = axes[0, 0], axes[0, 1]
         ax3, ax4 = axes[1, 0], axes[1, 1]
@@ -498,8 +506,9 @@ def generate_comparison_plot(
         ax1, ax2 = axes[0][0], axes[0][1]
         ax3, ax4 = axes[1][0], axes[1][1]
 
+    phase_label = f" (Phase {phase})" if phase else ""
     fig.suptitle(
-        f"LETTER Strategy Comparison & Rate-Distortion Frontier: {model_name} ({dataset})",
+        f"LETTER Rate-Distortion Pareto Frontier{phase_label}: {model_name} ({dataset})",
         fontsize=14,
         fontweight="bold",
         y=0.98,
@@ -524,14 +533,20 @@ def generate_comparison_plot(
                 return col
         return "#7f8c8d"
 
-    # -------------------------------------------------------------
-    # Panels 1 & 2: Rate-Distortion Frontiers (NDCG@10 and Hit@10)
-    # -------------------------------------------------------------
-    def plot_frontier_panel(ax, metric_key, metric_label):
+    # 4 Panels: Hit@10, NDCG@10, Hit@5, NDCG@5
+    metric_panels = [
+        (ax1, "hit@10", "Hit@10"),
+        (ax2, "ndcg@10", "NDCG@10"),
+        (ax3, "hit@5", "Hit@5"),
+        (ax4, "ndcg@5", "NDCG@5"),
+    ]
+
+    for ax, metric_key, metric_label in metric_panels:
         valid_fixed = [
             f for f in fixed_curve
             if f.get("status") == "completed" and f.get("metrics", {}).get(metric_key) is not None
         ]
+        valid_fixed.sort(key=lambda x: x["length"])
         if valid_fixed:
             fx_lens = [f["length"] for f in valid_fixed]
             fx_vals = [f["metrics"][metric_key] * 100.0 for f in valid_fixed]
@@ -555,14 +570,14 @@ def generate_comparison_plot(
             x = v["mean_length"]
             y = val * 100.0
             strat = v["strategy"]
-            phase = v["phase"]
+            v_ph = str(v.get("phase", ""))
             p_status = v.get("pareto_status", "")
             c = get_color(strat)
 
-            marker = "*" if phase == "1.5" else "s"
-            size = 150 if phase == "1.5" else 80
-            alpha = 0.95 if phase == "1.5" else 0.8
-            label_tag = f"{strat} (P{phase})" if phase not in ("fixed", "-") else strat
+            marker = "*" if v_ph == "1.5" else "s"
+            size = 140 if v_ph == "1.5" else 90
+            alpha = 0.95 if v_ph == "1.5" else 0.85
+            label_tag = strat if phase else (f"{strat} (P{v_ph})" if v_ph not in ("fixed", "-", "") else strat)
 
             ax.scatter(x, y, color=c, marker=marker, s=size, alpha=alpha,
                        edgecolors="black", linewidths=0.8, zorder=5, label=label_tag)
@@ -592,163 +607,6 @@ def generate_comparison_plot(
         if by_label:
             ax.legend(by_label.values(), by_label.keys(), loc="lower right", fontsize=7.5, framealpha=0.9)
 
-    plot_frontier_panel(ax1, "ndcg@10", "NDCG@10")
-    plot_frontier_panel(ax2, "hit@10", "Hit@10")
-
-    # -------------------------------------------------------------
-    # Panel 3: Token Savings & Sequence Compression (%)
-    # -------------------------------------------------------------
-    bar_items = []
-    for v in var_list:
-        strat = v["strategy"]
-        phase = v["phase"]
-        ml = v.get("mean_length")
-        sav = v.get("token_savings_pct")
-        if sav is None and ml is not None and max_length > 0:
-            sav = (1.0 - ml / max_length) * 100.0
-        lbl = f"{strat} (P{phase})" if phase not in ("fixed", "-") else strat
-        bar_items.append({
-            "label": lbl,
-            "strategy": strat,
-            "phase": phase,
-            "savings": sav if sav is not None else 0.0,
-            "mean_length": ml,
-            "is_fixed": False,
-        })
-
-    for f in fixed_curve:
-        f_len = f["length"]
-        f_lbl = f"fixed (L={int(f_len) if f_len.is_integer() else f_len})"
-        f_sav = ((max_length - f_len) / max_length * 100.0) if max_length > 0 else 0.0
-        bar_items.append({
-            "label": f_lbl,
-            "strategy": "fixed",
-            "phase": "fixed",
-            "savings": f_sav,
-            "mean_length": f_len,
-            "is_fixed": True,
-        })
-
-    seen_labels = set()
-    dedup_bar_items = []
-    for bi in bar_items:
-        if bi["label"] not in seen_labels:
-            seen_labels.add(bi["label"])
-            dedup_bar_items.append(bi)
-
-    dedup_bar_items.sort(key=lambda it: it["savings"])
-
-    if dedup_bar_items:
-        y_pos = list(range(len(dedup_bar_items)))
-        labels = [it["label"] for it in dedup_bar_items]
-        savings_vals = [it["savings"] for it in dedup_bar_items]
-        bar_colors = []
-        for it in dedup_bar_items:
-            if it["is_fixed"]:
-                bar_colors.append("#34495e")
-            else:
-                c = get_color(it["strategy"])
-                bar_colors.append(c)
-
-        h_bars = ax3.barh(y_pos, savings_vals, color=bar_colors, height=0.6, alpha=0.85, edgecolor="black", linewidth=0.6)
-        ax3.set_yticks(y_pos)
-        ax3.set_yticklabels(labels, fontsize=8.5)
-        ax3.set_xlabel("Token Savings vs. L_max (%)", fontsize=9.5)
-        ax3.set_title("Token Savings & Codebook Compression (%)", fontsize=11, fontweight="bold")
-        ax3.grid(True, linestyle="--", alpha=0.5, axis="x")
-
-        max_sav = max(savings_vals) if savings_vals else 50.0
-        ax3.set_xlim(0, max(max_sav * 1.35, 10.0))
-
-        for idx, (rect, it) in enumerate(zip(h_bars, dedup_bar_items)):
-            w = rect.get_width()
-            ml = it["mean_length"]
-            txt = f" {w:.1f}% (L̄={ml:.2f})" if ml is not None else f" {w:.1f}%"
-            ax3.text(w, rect.get_y() + rect.get_height() / 2.0, txt,
-                     ha="left", va="center", fontsize=8, fontweight="bold", color="#2c3e50")
-    else:
-        ax3.text(0.5, 0.5, "No token savings data available", ha="center", va="center", transform=ax3.transAxes)
-
-    # -------------------------------------------------------------
-    # Panel 4: Rate-Distortion Surplus (Δ_interp) & Strategy Deltas
-    # -------------------------------------------------------------
-    delta_items = []
-    for v in var_list:
-        if v.get("status") != "completed":
-            continue
-        strat = v["strategy"]
-        phase = v["phase"]
-        d_ndcg = v.get("delta_interp", {}).get("ndcg@10")
-        if d_ndcg is None:
-            d_ndcg = v.get("delta_lmax", {}).get("ndcg@10")
-
-        d_hit = v.get("delta_interp", {}).get("hit@10")
-        if d_hit is None:
-            d_hit = v.get("delta_lmax", {}).get("hit@10")
-
-        if d_ndcg is not None or d_hit is not None:
-            lbl = f"{strat} (P{phase})" if phase not in ("fixed", "-") else strat
-            h2h_info = (h2h_data or {}).get(strat, {}) if phase == "1.5" else {}
-            delta_items.append({
-                "label": lbl,
-                "strategy": strat,
-                "phase": phase,
-                "delta_ndcg": d_ndcg if d_ndcg is not None else 0.0,
-                "delta_hit": d_hit if d_hit is not None else 0.0,
-                "pareto_status": v.get("pareto_status", ""),
-                "h2h_delta_ndcg": h2h_info.get("delta_ndcg10"),
-                "h2h_delta_hit": h2h_info.get("delta_hit10"),
-            })
-
-    if delta_items:
-        y_pos = [float(i) for i in range(len(delta_items))]
-        bar_h = 0.36
-
-        ndcg_deltas = [it["delta_ndcg"] for it in delta_items]
-        hit_deltas = [it["delta_hit"] for it in delta_items]
-        labels = [it["label"] for it in delta_items]
-
-        y_ndcg = [y + bar_h / 2.0 for y in y_pos]
-        y_hit = [y - bar_h / 2.0 for y in y_pos]
-
-        rects1 = ax4.barh(y_ndcg, ndcg_deltas, height=bar_h, color="#2980b9", alpha=0.85,
-                          edgecolor="black", linewidth=0.6, label="Δ NDCG@10 vs. Matched Budget (%)")
-        rects2 = ax4.barh(y_hit, hit_deltas, height=bar_h, color="#8e44ad", alpha=0.85,
-                          edgecolor="black", linewidth=0.6, label="Δ Hit@10 vs. Matched Budget (%)")
-
-        ax4.axvline(0, color="#7f8c8d", linestyle="--", linewidth=1.2)
-        ax4.set_yticks(y_pos)
-        ax4.set_yticklabels(labels, fontsize=8.5)
-        ax4.set_xlabel("Surplus vs. Matched Fixed Baseline (%)", fontsize=9.5)
-        ax4.set_title("Rate-Distortion Efficiency Gain (Δ vs. Matched Budget)", fontsize=11, fontweight="bold")
-        ax4.grid(True, linestyle="--", alpha=0.5, axis="x")
-        ax4.legend(loc="lower right", fontsize=8, framealpha=0.9)
-
-        all_vals = ndcg_deltas + hit_deltas
-        min_v = min(all_vals) if all_vals else -5.0
-        max_v = max(all_vals) if all_vals else 10.0
-        span = max(abs(min_v), abs(max_v), 5.0)
-        ax4.set_xlim(min(min_v - span * 0.25, -2.0), max(max_v + span * 0.35, 5.0))
-
-        for idx, (r1, r2, it) in enumerate(zip(rects1, rects2, delta_items)):
-            w1 = r1.get_width()
-            p_stat = it["pareto_status"]
-            stat_tag = " ★" if "Dominant" in p_stat else (" ▲" if "Efficient" in p_stat else "")
-            h2h_str = ""
-            if it["h2h_delta_ndcg"] is not None:
-                h2h_str = f" [H2H: {it['h2h_delta_ndcg']:+.2f}%]"
-            if w1 >= 0:
-                ann_txt = f" {w1:+.1f}%{stat_tag}{h2h_str}"
-                ha = "left"
-            else:
-                ann_txt = f"{w1:+.1f}%{stat_tag}{h2h_str} "
-                ha = "right"
-            ax4.text(w1, r1.get_y() + r1.get_height() / 2.0, ann_txt,
-                     ha=ha, va="center", fontsize=7.5, fontweight="bold",
-                     color="#27ae60" if w1 >= 0 else "#c0392b")
-    else:
-        ax4.text(0.5, 0.5, "No rate-distortion surplus data available", ha="center", va="center", transform=ax4.transAxes)
-
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     try:
         fig.savefig(out_png_path, dpi=300, bbox_inches="tight")
@@ -761,9 +619,9 @@ def generate_comparison_plot(
         return False
 
 
-def generate_rate_distortion_plot(rd_data, dataset, model_name, out_png_path, **kwargs):
-    """Backward-compatible alias for generate_comparison_plot."""
-    return generate_comparison_plot(
+def generate_comparison_plot(rd_data, dataset, model_name, out_png_path, **kwargs):
+    """Backward-compatible alias for generate_rate_distortion_plot."""
+    return generate_rate_distortion_plot(
         rd_data=rd_data,
         dataset=dataset,
         model_name=model_name,
@@ -1107,44 +965,38 @@ def main():
         p15_by_strat = {r["strategy"]: r for r in recom_table_data if r["phase"] == "1.5"}
         common_h2h = [s for s in p1_by_strat if s in p15_by_strat]
 
-        # Plot generation
-        plot_saved = False
-        phase_sfx = "_phase1.5" if target_phase == "1.5" else ""
-        plot_fname = f"strategy_comparison_{dataset}{phase_sfx}{tag}.png"
-        plot_png_path = os.path.join(report_dir, plot_fname)
+        # Plot generation: Rate-Distortion Pareto Frontiers (Phase 1 and/or Phase 1.5)
+        generated_plots = {}
         if not args.no_plot:
-            h2h_dict = {}
-            for s in common_h2h:
-                r1 = p1_by_strat[s]
-                r15 = p15_by_strat[s]
-                if r1.get("status") == "completed" and r15.get("status") == "completed":
-                    m1 = r1.get("metrics", {})
-                    m15 = r15.get("metrics", {})
-                    h2h_dict[s] = {
-                        "delta_hit10": (m15.get("hit@10", 0) - m1.get("hit@10", 0)) * 100.0,
-                        "delta_ndcg10": (m15.get("ndcg@10", 0) - m1.get("ndcg@10", 0)) * 100.0,
-                    }
-            plot_saved = generate_comparison_plot(
-                rd_data=rd_data,
-                dataset=dataset,
-                model_name=model_name,
-                out_png_path=plot_png_path,
-                h2h_data=h2h_dict,
-                max_length=max_length,
-            )
-            if plot_saved:
-                aliases = [
-                    f"strategy_comparison_{dataset}{tag}.png",
-                    f"rate_distortion_frontier_{dataset}{phase_sfx}{tag}.png",
-                    f"rate_distortion_frontier_{dataset}{tag}.png",
-                ]
-                import shutil
-                for a_name in set(aliases):
-                    if a_name != plot_fname:
-                        try:
-                            shutil.copyfile(plot_png_path, os.path.join(report_dir, a_name))
-                        except Exception:
-                            pass
+            phases_to_plot = []
+            if target_phase == "1":
+                phases_to_plot.append("1")
+            elif target_phase == "1.5":
+                phases_to_plot.append("1.5")
+            elif target_phase in ("both", "all"):
+                has_p1 = any(str(v.get("phase")) == "1" and v.get("status") == "completed" for v in variable_bracketed)
+                has_p15 = any(str(v.get("phase")) == "1.5" and v.get("status") == "completed" for v in variable_bracketed)
+                if has_p1:
+                    phases_to_plot.append("1")
+                if has_p15:
+                    phases_to_plot.append("1.5")
+                if not phases_to_plot and (variable_bracketed or fixed_curve):
+                    phases_to_plot.append(None)
+
+            for p_val in phases_to_plot:
+                p_sfx = f"_phase{p_val}" if p_val else ""
+                p_fname = f"rate_distortion_frontier_{dataset}{p_sfx}{tag}.png"
+                p_path = os.path.join(report_dir, p_fname)
+                saved = generate_rate_distortion_plot(
+                    rd_data=rd_data,
+                    dataset=dataset,
+                    model_name=model_name,
+                    out_png_path=p_path,
+                    phase=p_val,
+                    max_length=max_length,
+                )
+                if saved:
+                    generated_plots[p_val] = p_fname
 
         # -------------------------------------------------------------
         # 1. TEXT FORMATTING
@@ -1434,11 +1286,6 @@ def main():
             f"- **Fixed ID Depth**: {max_length} tokens",
             f"- **Minimum Allowable Depth**: {min_length} token\n",
         ])
-        if plot_saved:
-            md_lines.extend([
-                "### Performance & Rate-Distortion Overview\n",
-                f"![Strategy Comparison Plot]({plot_fname})\n",
-            ])
         md_lines.extend([
             "### 1. Recommendation Performance\n",
             "| Strategy | Phase | Mean Length | Weighted Length | Collisions | Hit@1 | Hit@5 | Hit@10 | NDCG@5 | NDCG@10 | Status |",
@@ -1526,10 +1373,20 @@ def main():
             ])
             md_sec_idx += 1
 
-            if plot_saved:
-                md_lines.extend([
-                    f"![Rate-Distortion Pareto Frontier]({plot_fname})\n",
-                ])
+            if generated_plots:
+                if len(generated_plots) > 1:
+                    for p_key, p_img in sorted(generated_plots.items(), key=lambda x: str(x[0])):
+                        p_title = f"Phase {p_key} Rate-Distortion Pareto Frontier" if p_key else "Rate-Distortion Pareto Frontier"
+                        md_lines.extend([
+                            f"#### {p_title}\n",
+                            f"![{p_title}]({p_img})\n",
+                        ])
+                else:
+                    for p_key, p_img in generated_plots.items():
+                        p_title = f"Phase {p_key} Rate-Distortion Pareto Frontier" if p_key else "Rate-Distortion Pareto Frontier"
+                        md_lines.extend([
+                            f"![{p_title}]({p_img})\n",
+                        ])
 
             if len(fixed_curve) > 1:
                 md_lines.extend([
@@ -1657,6 +1514,7 @@ def main():
             "total_traffic": total_traffic,
             "min_length": min_length,
             "max_length": max_length,
+            "plot_files": list(generated_plots.values()),
             "fixed_curve": rd_data.get("fixed_curve", []),
             "rate_distortion_frontier": rd_data.get("variable_bracketed", []),
             "pareto_dominant_strategies": rd_data.get("pareto_dominant_strats", []),
