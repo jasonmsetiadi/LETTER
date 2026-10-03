@@ -1,4 +1,8 @@
+import importlib.util
+import json
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -374,6 +378,397 @@ class TestPhase15Trainer(unittest.TestCase):
             sys.modules["models.rq"].VectorQuantizer = orig_vq
 
 
+class TestPhase15Reporting(unittest.TestCase):
+    """Test report generation and Semantic ID evaluation for Phase 1.5."""
+
+    def test_file_to_strategy_phase_detection(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "generate_comparison_report",
+            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        # Phase 1 detection
+        self.assertEqual(mod.file_to_strategy("fixed.json"), ("fixed", "fixed"))
+        self.assertEqual(mod.file_to_strategy("varlen.json"), ("shortest_unique", "1"))
+        self.assertEqual(mod.file_to_strategy("varlen-res.json"), ("residual", "1"))
+        self.assertEqual(mod.file_to_strategy("varlen-pop.json"), ("popularity:frequency", "1"))
+        self.assertEqual(mod.file_to_strategy("varlen-pop-entropy.json"), ("popularity:user_entropy", "1"))
+        self.assertEqual(mod.file_to_strategy("varlen-pop-pagerank.json"), ("popularity:pagerank", "1"))
+
+        # Phase 1.5 detection
+        self.assertEqual(mod.file_to_strategy("varlen_phase1.5.json"), ("shortest_unique", "1.5"))
+        self.assertEqual(mod.file_to_strategy("varlen-res_phase1.5.json"), ("residual", "1.5"))
+        self.assertEqual(mod.file_to_strategy("varlen-pop_phase1.5.json"), ("popularity:frequency", "1.5"))
+        self.assertEqual(mod.file_to_strategy("varlen-pop-entropy_phase1.5.json"), ("popularity:user_entropy", "1.5"))
+        self.assertEqual(mod.file_to_strategy("varlen-pop-pagerank_phase1.5.json"), ("popularity:pagerank", "1.5"))
+
+        # With tag
+        self.assertEqual(mod.file_to_strategy("varlen-res_max10.json", tag="_max10"), ("residual", "1"))
+        self.assertEqual(mod.file_to_strategy("varlen-res_phase1.5_max10.json", tag="_max10"), ("residual", "1.5"))
+
+    def test_strategy_to_filename(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "generate_comparison_report",
+            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        self.assertEqual(mod.strategy_to_filename("fixed", "fixed"), "fixed.json")
+        self.assertEqual(mod.strategy_to_filename("residual", "1"), "varlen-res.json")
+        self.assertEqual(mod.strategy_to_filename("residual", "1.5"), "varlen-res_phase1.5.json")
+        self.assertEqual(mod.strategy_to_filename("popularity:frequency", "1.5"), "varlen-pop_phase1.5.json")
+        self.assertEqual(mod.strategy_to_filename("popularity:user_entropy", "1.5"), "varlen-pop-entropy_phase1.5.json")
+        self.assertEqual(mod.strategy_to_filename("residual", "1.5", tag="_max10"), "varlen-res_phase1.5_max10.json")
+
+    def test_item_sort_key(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "generate_comparison_report",
+            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        items = [
+            ("residual", "1.5"),
+            ("shortest_unique", "1"),
+            ("fixed", "fixed"),
+            ("popularity:frequency", "1.5"),
+            ("residual", "1"),
+            ("popularity:frequency", "1"),
+        ]
+        sorted_items = sorted(items, key=mod.item_sort_key)
+        expected = [
+            ("fixed", "fixed"),
+            ("shortest_unique", "1"),
+            ("popularity:frequency", "1"),
+            ("popularity:frequency", "1.5"),
+            ("residual", "1"),
+            ("residual", "1.5"),
+        ]
+        self.assertEqual(sorted_items, expected)
+
+    def test_compare_semantic_ids_phase1_5_loading(self):
+        from compare_semantic_ids import evaluate_semantic_ids
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            dataset = "MockData"
+            data_dir = tmp_path / "data" / dataset
+            tok_dir = data_dir / "rqvae"
+            tok_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create mock fixed index
+            fixed_idx = {"0": [1, 2, 3, 4], "1": [5, 6, 7, 8], "2": [9, 10, 11, 12]}
+            with open(data_dir / f"{dataset}.index.json", "w") as f:
+                json.dump(fixed_idx, f)
+
+            # Create mock interaction file
+            inter_data = {"0": [0, 1]}
+            with open(data_dir / f"{dataset}.inter.json", "w") as f:
+                json.dump(inter_data, f)
+
+            # Create Phase 1.5 residual index file
+            p15_idx = {"0": [1, 2], "1": [5, 6, 7], "2": [9, 10, 11, 12]}
+            p15_file = tok_dir / f"{dataset}.index.varlen.res-phase1.5.json"
+            with open(p15_file, "w") as f:
+                json.dump(p15_idx, f)
+
+            # Evaluate with strategies list containing tuple
+            eval_res = evaluate_semantic_ids(
+                dataset=dataset,
+                tokenizer="rqvae",
+                repo_root=tmp_path,
+                data_root=tmp_path / "data",
+                strategies=[("fixed", "fixed"), ("residual", "1.5")],
+            )
+
+            results = eval_res["results"]
+            self.assertEqual(len(results), 2)
+            self.assertEqual(results[0]["strategy"], "fixed")
+            self.assertEqual(results[0]["phase"], "fixed")
+            self.assertEqual(results[1]["strategy"], "residual")
+            self.assertEqual(results[1]["phase"], "1.5")
+            self.assertAlmostEqual(results[1]["mean_length"], (2 + 3 + 4) / 3.0)
+
+    def test_end_to_end_dual_phase_comparison_report(self):
+        import importlib.util
+        import tempfile
+        spec = importlib.util.spec_from_file_location(
+            "generate_comparison_report",
+            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            dataset = "DummyDataset"
+            data_dir = tmp_path / "data" / dataset
+            data_dir.mkdir(parents=True, exist_ok=True)
+            res_dir = tmp_path / "LETTER-TIGER" / "results" / dataset / "rqvae"
+            res_dir.mkdir(parents=True, exist_ok=True)
+
+            # Mock fixed index and inter
+            with open(data_dir / f"{dataset}.index.json", "w") as f:
+                json.dump({"0": [1, 2, 3, 4], "1": [2, 3, 4, 5]}, f)
+            with open(data_dir / f"{dataset}.inter.json", "w") as f:
+                json.dump({"0": [0, 1]}, f)
+
+            # Fixed baseline result
+            fixed_res = {"mean_results": {"hit@1": 0.05, "hit@5": 0.08, "hit@10": 0.10, "ndcg@5": 0.07, "ndcg@10": 0.08}}
+            with open(res_dir / "fixed.json", "w") as f:
+                json.dump(fixed_res, f)
+
+            # Phase 1 residual result
+            p1_res = {"mean_results": {"hit@1": 0.06, "hit@5": 0.085, "hit@10": 0.105, "ndcg@5": 0.075, "ndcg@10": 0.082}}
+            with open(res_dir / "varlen-res.json", "w") as f:
+                json.dump(p1_res, f)
+
+            # Phase 1.5 residual result
+            p15_res = {"mean_results": {"hit@1": 0.062, "hit@5": 0.088, "hit@10": 0.112, "ndcg@5": 0.078, "ndcg@10": 0.086}}
+            with open(res_dir / "varlen-res_phase1.5.json", "w") as f:
+                json.dump(p15_res, f)
+
+            # Run main() with mock argv
+            orig_argv = sys.argv
+            try:
+                sys.argv = [
+                    "generate_comparison_report.py",
+                    "--dataset", dataset,
+                    "--repo-root", str(tmp_path),
+                    "--phase", "both",
+                    "--tokenizer", "rqvae",
+                    "--strategies", "fixed,residual",
+                ]
+                mod.main()
+
+                # Verify files were generated
+                md_file = res_dir / "strategy_comparison.md"
+                json_file = res_dir / "strategy_comparison.json"
+                self.assertTrue(md_file.exists())
+                self.assertTrue(json_file.exists())
+
+                with open(md_file) as f:
+                    md_text = f.read()
+
+                # Verify markdown contains Phase columns and Head-to-Head section
+                self.assertIn("| Strategy | Phase | Mean Length |", md_text)
+                self.assertIn("Phase 1 vs. Phase 1.5 Head-to-Head Comparison", md_text)
+                self.assertIn("+0.70%", md_text)  # (0.112 - 0.105) * 100 = +0.70% Hit@10 delta!
+                self.assertIn("+0.40%", md_text)  # (0.086 - 0.082) * 100 = +0.40% NDCG@10 delta!
+
+                with open(json_file) as f:
+                    data = json.load(f)
+                strats = [(r["strategy"], r["phase"]) for r in data["strategy_comparison"]]
+                self.assertIn(("fixed", "fixed"), strats)
+                self.assertIn(("residual", "1"), strats)
+                self.assertIn(("residual", "1.5"), strats)
+            finally:
+                sys.argv = orig_argv
+
+    def test_file_to_strategy_multi_depth_fixed(self):
+        spec = importlib.util.spec_from_file_location(
+            "generate_comparison_report",
+            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        # Standard filenames without tag
+        self.assertEqual(mod.file_to_strategy("fixed.json"), ("fixed", "fixed"))
+        self.assertEqual(mod.file_to_strategy("fixed_L2.json"), ("fixed_L2", "fixed"))
+        self.assertEqual(mod.file_to_strategy("fixed_L3.json"), ("fixed_L3", "fixed"))
+        self.assertEqual(mod.file_to_strategy("fixed_L6.json"), ("fixed_L6", "fixed"))
+        self.assertEqual(mod.file_to_strategy("varlen-res.json"), ("residual", "1"))
+        self.assertEqual(mod.file_to_strategy("varlen-res_phase1.5.json"), ("residual", "1.5"))
+
+        # With tag
+        self.assertEqual(mod.file_to_strategy("fixed_max10.json", tag="_max10"), ("fixed", "fixed"))
+        self.assertEqual(mod.file_to_strategy("fixed_L10.json", tag="_max10"), ("fixed", "fixed"))
+        self.assertEqual(mod.file_to_strategy("fixed_L2.json", tag="_max10"), ("fixed_L2", "fixed"))
+
+    def test_strategy_sort_order_multi_depth_fixed(self):
+        spec = importlib.util.spec_from_file_location(
+            "generate_comparison_report",
+            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        strats = ["residual", "fixed", "fixed_L3", "fixed_L2", "shortest_unique"]
+        sorted_strats = sorted(strats, key=lambda s: mod.strategy_sort_key(s, max_length=4))
+        self.assertEqual(sorted_strats, ["fixed_L2", "fixed_L3", "fixed", "shortest_unique", "residual"])
+
+    def test_compute_rate_distortion_frontier(self):
+        spec = importlib.util.spec_from_file_location(
+            "generate_comparison_report",
+            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        # Mock table data with L=2 and L=4 fixed baselines
+        recom_data = [
+            {
+                "strategy": "fixed_L2",
+                "phase": "fixed",
+                "mean_length": 2.0,
+                "weighted_length": 2.0,
+                "status": "completed",
+                "metrics": {"hit@10": 0.08, "ndcg@10": 0.06},
+            },
+            {
+                "strategy": "fixed",
+                "phase": "fixed",
+                "mean_length": 4.0,
+                "weighted_length": 4.0,
+                "status": "completed",
+                "metrics": {"hit@10": 0.10, "ndcg@10": 0.08},
+            },
+            {
+                "strategy": "var_efficient",
+                "phase": "1.5",
+                "mean_length": 3.0,
+                "weighted_length": 3.0,
+                "status": "completed",
+                "metrics": {"hit@10": 0.095, "ndcg@10": 0.075},
+            },
+            {
+                "strategy": "var_dominant",
+                "phase": "1.5",
+                "mean_length": 3.0,
+                "weighted_length": 3.0,
+                "status": "completed",
+                "metrics": {"hit@10": 0.105, "ndcg@10": 0.085},
+            },
+            {
+                "strategy": "var_tradeoff",
+                "phase": "1",
+                "mean_length": 3.0,
+                "weighted_length": 3.0,
+                "status": "completed",
+                "metrics": {"hit@10": 0.085, "ndcg@10": 0.065},
+            },
+        ]
+
+        rd = mod.compute_rate_distortion_frontier(recom_data, max_length=4)
+        self.assertEqual(len(rd["fixed_curve"]), 2)
+        self.assertEqual(rd["fixed_curve"][0]["length"], 2.0)
+        self.assertEqual(rd["fixed_curve"][1]["length"], 4.0)
+
+        vb = {v["strategy"]: v for v in rd["variable_bracketed"]}
+
+        # Check var_efficient at L=3.0:
+        # Interpolated NDCG@10 = (0.06 + 0.08) / 2 = 0.070
+        # Metric is 0.075 > 0.070 -> ▲ Efficient
+        v_eff = vb["var_efficient"]
+        self.assertEqual(v_eff["floor_length"], 2.0)
+        self.assertEqual(v_eff["ceil_length"], 4.0)
+        self.assertAlmostEqual(v_eff["interp_metrics"]["ndcg@10"], 0.070, places=4)
+        self.assertAlmostEqual(v_eff["delta_interp"]["ndcg@10"], ((0.075 - 0.070) / 0.070) * 100, places=2)
+        self.assertEqual(v_eff["pareto_status"], "▲ Efficient")
+
+        # Check var_dominant at L=3.0:
+        # Metric is 0.085 >= 0.080 (ceil) -> ★ Dominant
+        v_dom = vb["var_dominant"]
+        self.assertEqual(v_dom["pareto_status"], "★ Dominant")
+        self.assertIn(("var_dominant", "1.5"), rd["pareto_dominant_strats"])
+
+        # Check var_tradeoff at L=3.0:
+        # Metric is 0.065 < 0.070 -> ▼ Trade-off
+        v_tr = vb["var_tradeoff"]
+        self.assertEqual(v_tr["pareto_status"], "▼ Trade-off")
+
+    def test_rate_distortion_report_end_to_end(self):
+        spec = importlib.util.spec_from_file_location(
+            "generate_comparison_report",
+            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            dataset = "RDDataset"
+            data_dir = tmp_path / "data" / dataset
+            data_dir.mkdir(parents=True, exist_ok=True)
+            res_dir = tmp_path / "LETTER-TIGER" / "results" / dataset / "rqvae"
+            res_dir.mkdir(parents=True, exist_ok=True)
+
+            with open(data_dir / f"{dataset}.index.json", "w") as f:
+                json.dump({"0": [1, 2, 3, 4], "1": [2, 3, 4, 5]}, f)
+            with open(data_dir / f"{dataset}.inter.json", "w") as f:
+                json.dump({"0": [0, 1]}, f)
+
+            # Fixed L=2 baseline result
+            with open(res_dir / "fixed_L2.json", "w") as f:
+                json.dump({"mean_results": {"hit@1": 0.03, "hit@5": 0.06, "hit@10": 0.08, "ndcg@5": 0.05, "ndcg@10": 0.06}}, f)
+
+            # Fixed L=4 baseline result
+            with open(res_dir / "fixed.json", "w") as f:
+                json.dump({"mean_results": {"hit@1": 0.05, "hit@5": 0.08, "hit@10": 0.10, "ndcg@5": 0.07, "ndcg@10": 0.08}}, f)
+
+            # Residual Phase 1.5 index with lengths 3
+            tok_data_dir = data_dir / "rqvae"
+            tok_data_dir.mkdir(parents=True, exist_ok=True)
+            with open(tok_data_dir / f"{dataset}.index.varlen.res-phase1.5.json", "w") as f:
+                json.dump({"0": [1, 2, 3], "1": [2, 3, 4]}, f)
+
+            # Residual Phase 1.5 result (NDCG@10 = 0.078 beats interpolated 0.070 at L=3.0)
+            with open(res_dir / "varlen-res_phase1.5.json", "w") as f:
+                json.dump({"mean_results": {"hit@1": 0.048, "hit@5": 0.078, "hit@10": 0.098, "ndcg@5": 0.068, "ndcg@10": 0.078}}, f)
+
+            orig_argv = sys.argv
+            try:
+                sys.argv = [
+                    "generate_comparison_report.py",
+                    "--dataset", dataset,
+                    "--repo-root", str(tmp_path),
+                    "--phase", "1.5",
+                    "--tokenizer", "rqvae",
+                    "--strategies", "fixed,residual",
+                ]
+                mod.main()
+
+                md_file = res_dir / "strategy_comparison_phase1.5.md"
+                json_file = res_dir / "strategy_comparison_phase1.5.json"
+                self.assertTrue(md_file.exists())
+                self.assertTrue(json_file.exists())
+
+                with open(md_file) as f:
+                    md_text = f.read()
+
+                # Verify Rate-Distortion section and content
+                self.assertIn("Rate-Distortion & Pareto Frontier Analysis", md_text)
+                self.assertIn("Reference Fixed-Length Rate-Distortion Curve", md_text)
+                self.assertIn("| **L=2** |", md_text)
+                self.assertIn("| **L=4** |", md_text)
+                self.assertIn("| **residual** |", md_text)
+                self.assertIn("▲ Efficient", md_text)
+                self.assertIn("+11.4%", md_text)
+
+                with open(json_file) as f:
+                    data = json.load(f)
+                self.assertIn("fixed_curve", data)
+                self.assertIn("rate_distortion_frontier", data)
+                self.assertEqual(len(data["fixed_curve"]), 2)
+
+                res_entry = [v for v in data["rate_distortion_frontier"] if v["strategy"] == "residual"][0]
+                self.assertEqual(res_entry["floor_length"], 2.0)
+                self.assertEqual(res_entry["ceil_length"], 4.0)
+                self.assertAlmostEqual(res_entry["interp_metrics"]["ndcg@10"], 0.070, places=4)
+                self.assertEqual(res_entry["pareto_status"], "▲ Efficient")
+            finally:
+                sys.argv = orig_argv
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

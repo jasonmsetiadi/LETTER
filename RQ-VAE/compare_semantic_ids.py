@@ -208,11 +208,19 @@ def evaluate_semantic_ids(
                 tok_dir / f"{dataset}.index.fixed.L{max_length}.json",
                 tok_dir / f"{dataset}.index.fixed.json",
                 tok_dir / f"{dataset}.index.fixed-for-varlen.json",
+                dataset_dir / f"{dataset}.index.fixed-for-varlen.L{max_length}.json",
+                dataset_dir / f"{dataset}.index.fixed.L{max_length}.json",
+                dataset_dir / f"{dataset}.index.fixed.json",
+                dataset_dir / f"{dataset}.index.fixed-for-varlen.json",
+                dataset_dir / f"{dataset}.index.json",
             ])
         else:
             cand_list.extend([
                 tok_dir / f"{dataset}.index.fixed.json",
                 tok_dir / f"{dataset}.index.fixed-for-varlen.json",
+                dataset_dir / f"{dataset}.index.fixed.json",
+                dataset_dir / f"{dataset}.index.fixed-for-varlen.json",
+                dataset_dir / f"{dataset}.index.json",
             ])
         index_file = next((c for c in cand_list if c.exists()), cand_list[0])
     index_file = Path(index_file)
@@ -240,21 +248,54 @@ def evaluate_semantic_ids(
     results = []
     strategy_lengths = {}
 
-    def add_fixed():
-        strategy_lengths["fixed"] = {str(i): max_length for i in items}
+    def add_fixed(depth=None, strat_name=None):
+        d = depth if depth is not None else max_length
+        s_name = strat_name or ("fixed" if d == max_length else f"fixed_L{d}")
+        strategy_lengths[s_name] = {str(i): d for i in items}
+
+        loaded_d_index = None
+        d_candidates = [
+            tok_dir / f"{dataset}.index.fixed.L{d}.json",
+            tok_dir / f"{dataset}.index.fixed-for-varlen.L{d}.json",
+            dataset_dir / f"{dataset}.index.fixed.L{d}.json",
+            dataset_dir / f"{dataset}.index.fixed-for-varlen.L{d}.json",
+        ]
+        if d == 4:
+            d_candidates.extend([
+                tok_dir / f"{dataset}.index.fixed.json",
+                dataset_dir / f"{dataset}.index.fixed.json",
+            ])
+        for dc in d_candidates:
+            if dc.exists():
+                try:
+                    with dc.open(encoding="utf-8") as f:
+                        loaded_d_index = json.load(f)
+                    break
+                except Exception:
+                    pass
+
+        if loaded_d_index:
+            u_ids = len({tuple(x) for x in loaded_d_index.values()})
+            c_count = len(loaded_d_index) - u_ids
+        else:
+            trunc_fixed = {i: c[:d] for i, c in indices.items()}
+            u_ids = len({tuple(c) for c in trunc_fixed.values()})
+            c_count = len(trunc_fixed) - u_ids
+
         results.append({
-            "strategy": "fixed",
+            "strategy": s_name,
+            "phase": "fixed",
             "signal": "fixed",
-            "label": f"Fixed (L={max_length})",
-            "basis": f"Uniform fixed codebook depth L={max_length}",
-            "file_tag": "fixed",
-            "mean_length": float(max_length),
-            "traffic_weighted_length": float(max_length),
-            "token_savings_pct": 0.0,
+            "label": f"Fixed (L={d})",
+            "basis": f"Uniform fixed codebook depth L={d}",
+            "file_tag": s_name,
+            "mean_length": float(d),
+            "traffic_weighted_length": float(d),
+            "token_savings_pct": ((max_length - d) / max_length * 100.0) if max_length > 0 else 0.0,
             "spearman_rho_vs_frequency": None,
-            "length_distribution": {max_length: len(indices)},
-            "unique_ids": len(indices),
-            "collisions": 0,
+            "length_distribution": {d: len(indices)},
+            "unique_ids": u_ids,
+            "collisions": c_count,
         })
 
     def add_shortest_unique():
@@ -273,6 +314,7 @@ def evaluate_semantic_ids(
         su_coll = len(trunc_su) - su_uniq
         results.append({
             "strategy": "shortest_unique",
+            "phase": "1",
             "signal": "shortest_unique",
             "label": "Shortest Unique",
             "basis": "Shortest unambiguous trie prefix per item",
@@ -313,6 +355,7 @@ def evaluate_semantic_ids(
             res_coll = len(trunc_res) - res_uniq
             results.append({
                 "strategy": "residual",
+                "phase": "1",
                 "signal": "residual",
                 "label": f"Residual (Thresh={residual_threshold})",
                 "basis": f"Shortest prefix with cumulative reconstruction error <= {residual_threshold}",
@@ -325,9 +368,10 @@ def evaluate_semantic_ids(
                 "unique_ids": res_uniq,
                 "collisions": res_coll,
             })
-        elif existing_sid_entries and "residual" in existing_sid_entries:
-            prev = dict(existing_sid_entries["residual"])
+        elif existing_sid_entries and ("residual" in existing_sid_entries or ("residual", "1") in existing_sid_entries):
+            prev = dict(existing_sid_entries.get(("residual", "1")) or existing_sid_entries.get("residual"))
             prev["strategy"] = "residual"
+            prev["phase"] = "1"
             prev["signal"] = "residual"
             results.append(prev)
             if existing_lengths and "residual" in existing_lengths:
@@ -345,9 +389,13 @@ def evaluate_semantic_ids(
                 except ImportError:
                     can_compute = False
             if not can_compute:
-                if existing_sid_entries and strat_key in existing_sid_entries:
-                    prev = dict(existing_sid_entries[strat_key])
+                prev_cand = None
+                if existing_sid_entries:
+                    prev_cand = existing_sid_entries.get((strat_key, "1")) or existing_sid_entries.get(strat_key)
+                if prev_cand:
+                    prev = dict(prev_cand)
                     prev["strategy"] = strat_key
+                    prev["phase"] = "1"
                     prev["signal"] = strat_key
                     results.append(prev)
                     if existing_lengths and strat_key in existing_lengths:
@@ -379,6 +427,7 @@ def evaluate_semantic_ids(
 
         results.append({
             "strategy": strat_key,
+            "phase": "1",
             "signal": strat_key,
             "label": meta["label"],
             "basis": meta["basis"],
@@ -392,10 +441,170 @@ def evaluate_semantic_ids(
             "collisions": collisions,
         })
 
+    def add_phase1_5(strat, strat_key=None):
+        if strat_key is None:
+            strat_key = strat
+        meta = SIGNAL_METADATA.get(strat, {"label": strat, "basis": "", "file_tag": strat})
+
+        # Determine file suffix
+        var_tag = (
+            ""
+            if (max_length == 4 and min_length == 1)
+            else (f".max{max_length}" if min_length == 1 else f".min{min_length}-max{max_length}")
+        )
+
+        strat_suffix = ""
+        sig_name = None
+        if strat == "shortest_unique":
+            strat_suffix = ""
+        elif strat == "residual":
+            strat_suffix = ".res"
+        elif strat.startswith("popularity") or strat.startswith("collaborative") or strat.startswith("pop-"):
+            if ":" in strat:
+                sig_name = strat.split(":", 1)[1]
+            elif strat.startswith("pop-"):
+                sig_name = strat[4:]
+            else:
+                sig_name = "frequency"
+            alias = {
+                "pop": "frequency",
+                "raw": "frequency",
+                "entropy": "user_entropy",
+                "pr": "pagerank",
+                "cooccur": "co_occurrence",
+                "co_occur": "co_occurrence",
+                "cooccurrence": "co_occurrence",
+                "cf": "cf_density",
+            }
+            sig_name = alias.get(sig_name, sig_name)
+            sig_suffix_map = {
+                "frequency": ".pop",
+                "user_entropy": ".pop-entropy",
+                "pagerank": ".pop-pagerank",
+                "co_occurrence": ".pop-cooccur",
+                "cf_density": ".pop-cf",
+            }
+            strat_suffix = sig_suffix_map.get(sig_name, f".pop-{sig_name}")
+            meta = SIGNAL_METADATA.get(sig_name, meta)
+
+        cand_files = [
+            tok_dir / f"{dataset}.index.varlen{strat_suffix}-phase1.5{var_tag}.json",
+            tok_dir / f"{dataset}.index.varlen{strat_suffix}-phase1.5.json",
+            dataset_dir / f"{dataset}.index.varlen{strat_suffix}-phase1.5{var_tag}.json",
+            dataset_dir / f"{dataset}.index.varlen{strat_suffix}-phase1.5.json",
+        ]
+        found_file = next((c for c in cand_files if c.exists()), None)
+
+        if found_file:
+            with found_file.open(encoding="utf-8") as f:
+                idx_p15 = json.load(f)
+
+            # Check summary file
+            sum_file = found_file.with_suffix("").with_suffix(".summary.json")
+            if not sum_file.exists():
+                sum_file = found_file.parent / (found_file.stem + ".summary.json")
+
+            sum_data = {}
+            if sum_file.exists():
+                try:
+                    with sum_file.open(encoding="utf-8") as sf:
+                        sum_data = json.load(sf)
+                except Exception:
+                    pass
+
+            lens_p15 = {str(k): len(v) for k, v in idx_p15.items()}
+            strategy_lengths[(strat_key, "1.5")] = lens_p15
+
+            mean_len = sum_data.get("mean_length") or (sum(lens_p15.values()) / max(1, len(lens_p15)))
+            unique_ids = sum_data.get("unique_ids") if "unique_ids" in sum_data else len({tuple(v) for v in idx_p15.values()})
+            collisions = sum_data.get("collisions") if "collisions" in sum_data else (len(idx_p15) - unique_ids)
+            length_dist = sum_data.get("length_distribution") or dict(sorted(Counter(lens_p15.values()).items()))
+
+            traffic_w_len = sum(len(idx_p15.get(str(i), [])) * raw_freqs.get(str(i), 0) for i in items if str(i) in idx_p15) / total_traffic
+            token_savings_pct = (1.0 - traffic_w_len / max_length) * 100.0
+
+            rho = None
+            if sig_name and sig_name in SIGNAL_METADATA:
+                try:
+                    scores, _ = compute_interaction_signals(
+                        inter_file,
+                        signal=sig_name,
+                        cf_emb_file=cf_emb_file if sig_name == "cf_density" else None,
+                    )
+                    rho = compute_spearman_correlation(scores, lens_p15, items)
+                except Exception:
+                    pass
+
+            results.append({
+                "strategy": strat_key,
+                "phase": "1.5",
+                "signal": sig_name or strat,
+                "label": f"{meta.get('label', strat)} (Phase 1.5)",
+                "basis": f"Length-Aware Training (Phase 1.5): {meta.get('basis', '')}".strip(),
+                "file_tag": f"{meta.get('file_tag', strat)}-phase1.5",
+                "mean_length": mean_len,
+                "traffic_weighted_length": traffic_w_len,
+                "token_savings_pct": token_savings_pct,
+                "spearman_rho_vs_frequency": rho,
+                "length_distribution": length_dist,
+                "unique_ids": unique_ids,
+                "collisions": collisions,
+            })
+        elif existing_sid_entries and (
+            (strat_key, "1.5") in existing_sid_entries
+            or f"{strat_key}_phase1.5" in existing_sid_entries
+            or f"{strat_key}:phase1.5" in existing_sid_entries
+        ):
+            prev = dict(
+                existing_sid_entries.get((strat_key, "1.5"))
+                or existing_sid_entries.get(f"{strat_key}_phase1.5")
+                or existing_sid_entries.get(f"{strat_key}:phase1.5")
+            )
+            prev["strategy"] = strat_key
+            prev["phase"] = "1.5"
+            results.append(prev)
+            if existing_lengths and (strat_key, "1.5") in existing_lengths:
+                strategy_lengths[(strat_key, "1.5")] = existing_lengths[(strat_key, "1.5")]
+        else:
+            results.append({
+                "strategy": strat_key,
+                "phase": "1.5",
+                "signal": sig_name or strat,
+                "label": f"{meta.get('label', strat)} (Phase 1.5)",
+                "basis": f"Length-Aware Training (Phase 1.5): {meta.get('basis', '')}".strip(),
+                "file_tag": f"{meta.get('file_tag', strat)}-phase1.5",
+                "mean_length": None,
+                "traffic_weighted_length": None,
+                "token_savings_pct": None,
+                "spearman_rho_vs_frequency": None,
+                "length_distribution": {},
+                "unique_ids": 0,
+                "collisions": 0,
+            })
+
     if strategies is not None:
-        for strat in strategies:
-            if strat == "fixed":
-                add_fixed()
+        for item in strategies:
+            if isinstance(item, tuple):
+                strat, item_phase = item[0], str(item[1])
+            elif isinstance(item, str):
+                if item.endswith(":phase1.5") or item.endswith("@phase1.5") or item.endswith("_phase1.5"):
+                    item_phase = "1.5"
+                    strat = item.rsplit(":", 1)[0].rsplit("@", 1)[0].rsplit("_phase1.5", 1)[0]
+                else:
+                    strat = item
+                    item_phase = "fixed" if (strat == "fixed" or strat.startswith("fixed_L")) else "1"
+            else:
+                strat = str(item)
+                item_phase = "fixed" if (strat == "fixed" or strat.startswith("fixed_L")) else "1"
+
+            if item_phase == "1.5":
+                add_phase1_5(strat)
+            elif strat == "fixed" or (isinstance(strat, str) and strat.startswith("fixed_L")):
+                if strat.startswith("fixed_L") and strat[7:].isdigit():
+                    d = int(strat[7:])
+                    add_fixed(depth=d, strat_name=strat)
+                else:
+                    add_fixed()
             elif strat == "shortest_unique":
                 add_shortest_unique()
             elif strat == "residual":
@@ -439,18 +648,31 @@ def evaluate_semantic_ids(
 
     pairwise_match = {}
     pairwise_mae = {}
-    valid_strats = [r["strategy"] for r in results if r["strategy"] in strategy_lengths]
-    if pairwise and len(valid_strats) > 1:
+    has_phase15 = any(r.get("phase") == "1.5" for r in results)
+
+    pairwise_items = []
+    for r in results:
+        strat = r["strategy"]
+        ph = str(r.get("phase", "1"))
+        l_key = (strat, ph) if (strat, ph) in strategy_lengths else (strat if strat in strategy_lengths else None)
+        if l_key and l_key in strategy_lengths:
+            if has_phase15 and ph not in ("fixed", "-"):
+                display_label = f"{strat} (P{ph})"
+            else:
+                display_label = strat
+            pairwise_items.append((display_label, l_key))
+
+    if pairwise and len(pairwise_items) > 1:
         n_items = len(items)
-        for s1 in valid_strats:
-            pairwise_match[s1] = {}
-            pairwise_mae[s1] = {}
-            l1 = strategy_lengths[s1]
-            for s2 in valid_strats:
-                l2 = strategy_lengths[s2]
+        for d1, k1 in pairwise_items:
+            pairwise_match[d1] = {}
+            pairwise_mae[d1] = {}
+            l1 = strategy_lengths[k1]
+            for d2, k2 in pairwise_items:
+                l2 = strategy_lengths[k2]
                 exact_matches = sum(l1.get(str(i), 0) == l2.get(str(i), 0) for i in items)
-                pairwise_match[s1][s2] = round((exact_matches / n_items) * 100.0, 2)
-                pairwise_mae[s1][s2] = round(
+                pairwise_match[d1][d2] = round((exact_matches / n_items) * 100.0, 2)
+                pairwise_mae[d1][d2] = round(
                     sum(abs(l1.get(str(i), 0) - l2.get(str(i), 0)) for i in items) / n_items, 3
                 )
 
