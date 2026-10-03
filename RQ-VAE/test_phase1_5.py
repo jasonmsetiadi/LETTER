@@ -988,6 +988,64 @@ class TestPhase15Reporting(unittest.TestCase):
             finally:
                 sys.argv = orig_argv
 
+    def test_autodetect_max_length_and_fixed_depths(self):
+        spec = importlib.util.spec_from_file_location(
+            "generate_comparison_report",
+            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            report_dir = tmp_path / "results"
+            report_dir.mkdir(parents=True, exist_ok=True)
+            data_dir = tmp_path / "data" / "TestDS"
+            data_dir.mkdir(parents=True, exist_ok=True)
+
+            # Case 1: Empty dir fallback
+            max_l, tag, depths = mod.autodetect_max_length_and_fixed_depths(
+                str(report_dir), str(tmp_path / "data"), "TestDS", "rqvae"
+            )
+            self.assertEqual(max_l, 4)
+            self.assertEqual(tag, "")
+
+            # Case 2: Multi-depth fixed files (L=2, L=3, L=6)
+            (report_dir / "fixed_L2.json").write_text("{}")
+            (report_dir / "fixed_L3.json").write_text("{}")
+            (report_dir / "fixed_L6.json").write_text("{}")
+            max_l, tag, depths = mod.autodetect_max_length_and_fixed_depths(
+                str(report_dir), str(tmp_path / "data"), "TestDS", "rqvae"
+            )
+            self.assertEqual(max_l, 6)
+            self.assertEqual(depths, [2, 3, 6])
+            self.assertEqual(tag, "")
+
+            # Case 3: _max10 tagged files
+            (report_dir / "fixed_max10.json").write_text("{}")
+            max_l, tag, depths = mod.autodetect_max_length_and_fixed_depths(
+                str(report_dir), str(tmp_path / "data"), "TestDS", "rqvae"
+            )
+            self.assertEqual(max_l, 10)
+            self.assertEqual(tag, "_max10")
+
+            # Case 4: Explicit max_length override
+            max_l, tag, depths = mod.autodetect_max_length_and_fixed_depths(
+                str(report_dir), str(tmp_path / "data"), "TestDS", "rqvae", explicit_max_length=8
+            )
+            self.assertEqual(max_l, 8)
+            self.assertEqual(tag, "_max8")
+
+            # Case 5: Catalog index file detection (length 5)
+            with open(data_dir / "TestDS.index.json", "w") as f:
+                json.dump({"0": [1, 2, 3, 4, 5]}, f)
+            empty_rep = tmp_path / "empty_rep"
+            empty_rep.mkdir()
+            max_l, tag, depths = mod.autodetect_max_length_and_fixed_depths(
+                str(empty_rep), str(tmp_path / "data"), "TestDS", "rqvae"
+            )
+            self.assertEqual(max_l, 5)
+
 
 if __name__ == "__main__":
     unittest.main()

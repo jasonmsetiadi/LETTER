@@ -26,7 +26,12 @@ def parse_args():
         default=None,
         help="Dataset parent directory (defaults to <repo-root>/data).",
     )
-    parser.add_argument("--max-length", type=int, default=4, help="Maximum SID length.")
+    parser.add_argument(
+        "--max-length",
+        type=int,
+        default=None,
+        help="Maximum SID length (auto-detected from available results/indices if omitted).",
+    )
     parser.add_argument("--min-length", type=int, default=1, help="Minimum SID length.")
     parser.add_argument(
         "--strategies",
@@ -190,6 +195,114 @@ def item_sort_key(item, max_length=4):
     base = strategy_sort_key(strat, max_length=max_length)
     phase_order = 0 if phase in ("fixed", "-") else (1 if phase == "1" else 2)
     return (base[0], base[1], base[2], strat, phase_order)
+
+
+def autodetect_max_length_and_fixed_depths(
+    report_dir,
+    data_root,
+    dataset,
+    tokenizer="rqvae",
+    explicit_max_length=None,
+    min_length=1,
+):
+    """
+    Auto-detect all available fixed depths and determine max_length and filename tag.
+    Returns:
+        (max_length: int, tag: str, detected_depths: list[int])
+    """
+    import re
+    discovered_depths = set()
+    found_max_tags = set()
+
+    # 1. Scan result files in report_dir
+    if report_dir and os.path.isdir(report_dir):
+        for fname in os.listdir(report_dir):
+            if not fname.endswith(".json"):
+                continue
+            # fixed_L{depth}.json
+            m_l = re.match(r"^fixed_L(\d+)\.json$", fname)
+            if m_l:
+                discovered_depths.add(int(m_l.group(1)))
+
+            # *_max{depth}.json (e.g. fixed_max10.json, varlen_max10.json)
+            m_tag = re.search(r"_max(\d+)\.json$", fname)
+            if m_tag:
+                d = int(m_tag.group(1))
+                discovered_depths.add(d)
+                found_max_tags.add(d)
+
+            # unadorned fixed.json
+            if fname == "fixed.json":
+                discovered_depths.add(4)
+
+            # Existing strategy_comparison report JSON
+            if fname.startswith("strategy_comparison") and fname.endswith(".json"):
+                try:
+                    with open(os.path.join(report_dir, fname), encoding="utf-8") as f:
+                        sc_data = json.load(f)
+                    if isinstance(sc_data, dict):
+                        if "max_length" in sc_data and isinstance(sc_data["max_length"], int):
+                            discovered_depths.add(sc_data["max_length"])
+                        for fc in sc_data.get("fixed_curve", []):
+                            if "length" in fc:
+                                discovered_depths.add(int(fc["length"]))
+                except Exception:
+                    pass
+
+    # 2. Scan dataset index files in data_root/dataset and data_root/dataset/tokenizer
+    if data_root and dataset:
+        index_dirs = [
+            os.path.join(data_root, dataset, tokenizer),
+            os.path.join(data_root, dataset),
+        ]
+        for idir in index_dirs:
+            if not os.path.isdir(idir):
+                continue
+            for fname in os.listdir(idir):
+                if not fname.endswith(".json"):
+                    continue
+                m_max = re.search(r"max(\d+)", fname)
+                if m_max:
+                    discovered_depths.add(int(m_max.group(1)))
+                m_fixed_l = re.search(r"\.L(\d+)\.json$", fname)
+                if m_fixed_l:
+                    discovered_depths.add(int(m_fixed_l.group(1)))
+                if fname == f"{dataset}.index.json":
+                    try:
+                        with open(os.path.join(idir, fname), encoding="utf-8") as f:
+                            idx_data = json.load(f)
+                        if isinstance(idx_data, dict) and idx_data:
+                            first_sid = next(iter(idx_data.values()))
+                            if isinstance(first_sid, (list, tuple)):
+                                discovered_depths.add(len(first_sid))
+                    except Exception:
+                        pass
+
+    # 3. Determine max_length
+    if explicit_max_length is not None:
+        max_length = explicit_max_length
+    elif discovered_depths:
+        max_length = max(discovered_depths)
+    else:
+        max_length = 4
+
+    # 4. Determine tag
+    tag = ""
+    if min_length != 1:
+        tag = f"_min{min_length}-max{max_length}"
+    elif explicit_max_length is not None:
+        tag = "" if explicit_max_length == 4 else f"_max{explicit_max_length}"
+    elif max_length in found_max_tags:
+        tag = f"_max{max_length}"
+    elif max_length != 4:
+        if report_dir and os.path.isdir(report_dir) and any(f.endswith(f"_max{max_length}.json") for f in os.listdir(report_dir)):
+            tag = f"_max{max_length}"
+        else:
+            tag = ""
+    else:
+        tag = ""
+
+    return max_length, tag, sorted(list(discovered_depths))
 
 
 def compute_rate_distortion_frontier(recom_table_data, max_length=4):
@@ -664,7 +777,7 @@ def main():
     dataset = args.dataset
     repo_root = args.repo_root
     data_root = args.data_root or os.path.join(repo_root, "data")
-    max_length = args.max_length
+    explicit_max_length = args.max_length
     min_length = args.min_length
 
     # Parse strategies and models
@@ -675,8 +788,6 @@ def main():
     models = [m.strip().lower() for m in raw_models if m.strip()]
 
     tokenizer = (args.tokenizer or "rqvae").strip().lower()
-    tag = "" if (max_length == 4 and min_length == 1) else (f"_max{max_length}" if min_length == 1 else f"_min{min_length}-max{max_length}")
-
     target_phase = args.phase.lower()
 
     for model in models:
@@ -688,6 +799,16 @@ def main():
             if os.path.isdir(legacy_dir) and any(f.endswith(".json") for f in os.listdir(legacy_dir)):
                 report_dir = legacy_dir
         os.makedirs(report_dir, exist_ok=True)
+
+        # Auto-detect max_length, tag, and available fixed depths
+        max_length, tag, detected_depths = autodetect_max_length_and_fixed_depths(
+            report_dir=report_dir,
+            data_root=data_root,
+            dataset=dataset,
+            tokenizer=tokenizer,
+            explicit_max_length=explicit_max_length,
+            min_length=min_length,
+        )
 
         if target_phase == "1.5":
             report_json = os.path.join(report_dir, f"strategy_comparison_phase1.5{tag}.json")
@@ -822,6 +943,11 @@ def main():
 
         for itm in discovered_items:
             add_entry(itm[0], itm[1])
+
+        # Also add any discovered fixed depths (e.g. fixed_L2, fixed_L3)
+        for d in detected_depths:
+            if d != max_length:
+                add_entry(f"fixed_L{d}", "fixed")
 
         for k in existing_entries:
             if isinstance(k, tuple):

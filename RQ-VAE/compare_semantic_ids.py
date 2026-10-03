@@ -202,7 +202,7 @@ def evaluate_semantic_ids(
 
     if index_file is None:
         cand_list = []
-        if max_length != 4:
+        if max_length and max_length != 4:
             cand_list.extend([
                 tok_dir / f"{dataset}.index.fixed-for-varlen.L{max_length}.json",
                 tok_dir / f"{dataset}.index.fixed.L{max_length}.json",
@@ -240,6 +240,10 @@ def evaluate_semantic_ids(
 
     with index_file.open(encoding="utf-8") as f:
         indices = json.load(f)
+
+    if max_length is None and indices:
+        first_v = next(iter(indices.values()))
+        max_length = len(first_v) if isinstance(first_v, (list, tuple)) else 4
 
     raw_scores, raw_freqs = compute_interaction_signals(inter_file, signal="frequency")
     items = list(indices.keys())
