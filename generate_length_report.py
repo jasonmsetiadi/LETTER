@@ -158,6 +158,8 @@ def generate_length_plot(table_data, dataset, model_name, tokenizers, tested_len
         ("ndcg@5", "NDCG@5 (%)", "NDCG@5 vs. Codebook Depth", axes[1, 1]),
     ]
 
+    global_legend_items = {}
+
     for metric_key, ylabel, title, ax in metrics_to_plot:
         for idx, tok in enumerate(tokenizers):
             label = get_tokenizer_label(tok)
@@ -189,9 +191,28 @@ def generate_length_plot(table_data, dataset, model_name, tokenizers, tested_len
         ax.set_ylabel(ylabel, fontsize=10)
         ax.set_xticks(x_lengths)
         ax.grid(True, linestyle="--", alpha=0.5)
-        ax.legend(frameon=True, fontsize=9)
 
-    plt.tight_layout()
+        try:
+            handles, labels = ax.get_legend_handles_labels()
+            for h, l in zip(handles, labels):
+                if l and l not in global_legend_items:
+                    global_legend_items[l] = h
+        except (TypeError, ValueError):
+            pass
+
+    plt.tight_layout(rect=[0, 0.06, 1, 0.96])
+    if global_legend_items:
+        fig.legend(
+            global_legend_items.values(),
+            global_legend_items.keys(),
+            loc="lower center",
+            bbox_to_anchor=(0.5, 0.01),
+            ncol=min(4, len(global_legend_items)),
+            fontsize=9.5,
+            frameon=True,
+            framealpha=0.95,
+        )
+
     fig.savefig(out_png_path, bbox_inches="tight")
     plt.close(fig)
     print(f"Plot image saved to:    {out_png_path}")

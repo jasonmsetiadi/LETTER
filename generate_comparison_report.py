@@ -566,6 +566,8 @@ def generate_rate_distortion_plot(
         (ax4, "ndcg@5", "NDCG@5"),
     ]
 
+    global_legend_items = {}
+
     for ax, metric_key, metric_label in metric_panels:
         valid_fixed = [
             f for f in fixed_curve
@@ -626,13 +628,27 @@ def generate_rate_distortion_plot(
 
         try:
             handles, labels = ax.get_legend_handles_labels()
+            for h, l in zip(handles, labels):
+                if l and l not in global_legend_items:
+                    global_legend_items[l] = h
         except (TypeError, ValueError):
-            handles, labels = [], []
-        by_label = dict(zip(labels, handles))
-        if by_label:
-            ax.legend(by_label.values(), by_label.keys(), loc="lower right", fontsize=7.5, framealpha=0.9)
+            pass
 
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.tight_layout(rect=[0, 0.08, 1, 0.96])
+    if global_legend_items:
+        n_items = len(global_legend_items)
+        ncol = min(4, n_items)
+        fig.legend(
+            global_legend_items.values(),
+            global_legend_items.keys(),
+            loc="lower center",
+            bbox_to_anchor=(0.5, 0.01),
+            ncol=ncol,
+            fontsize=8.5,
+            frameon=True,
+            framealpha=0.95,
+        )
+
     try:
         fig.savefig(out_png_path, dpi=300, bbox_inches="tight")
         plt.close(fig)
