@@ -767,8 +767,230 @@ class TestPhase15Reporting(unittest.TestCase):
             finally:
                 sys.argv = orig_argv
 
+    def test_generate_comparison_plot_missing_matplotlib(self):
+        spec = importlib.util.spec_from_file_location(
+            "generate_comparison_report",
+            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        # Matplotlib is not installed in the test env, so this should return False gracefully
+        rd_data = {"fixed_curve": [], "variable_bracketed": []}
+        res = mod.generate_comparison_plot(rd_data, "Instruments", "LETTER-TIGER", "/tmp/dummy.png")
+        self.assertFalse(res)
+
+        # Check backward compatibility alias
+        res_alias = mod.generate_rate_distortion_plot(rd_data, "Instruments", "LETTER-TIGER", "/tmp/dummy.png")
+        self.assertFalse(res_alias)
+
+    def test_generate_comparison_plot_with_mocked_matplotlib(self):
+        from unittest.mock import MagicMock, patch
+        spec = importlib.util.spec_from_file_location(
+            "generate_comparison_report",
+            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        mock_plt = MagicMock()
+        mock_fig = MagicMock()
+        mock_ax1 = MagicMock()
+        mock_ax2 = MagicMock()
+        mock_ax3 = MagicMock()
+        mock_ax4 = MagicMock()
+        for ax in [mock_ax1, mock_ax2, mock_ax3, mock_ax4]:
+            ax.get_legend_handles_labels.return_value = ([], [])
+        mock_axes = [[mock_ax1, mock_ax2], [mock_ax3, mock_ax4]]
+        mock_plt.subplots.return_value = (mock_fig, mock_axes)
+
+        class MockRect:
+            def __init__(self, w=10.0, y=0.0, h=0.5):
+                self.w, self.y, self.h = w, y, h
+            def get_width(self): return self.w
+            def get_y(self): return self.y
+            def get_height(self): return self.h
+
+        mock_ax3.barh.return_value = [MockRect(50.0), MockRect(25.0)]
+        mock_ax4.barh.return_value = [MockRect(11.4), MockRect(8.9)]
+
+        mock_matplotlib = MagicMock()
+        mock_matplotlib.pyplot = mock_plt
+
+        rd_data = {
+            "fixed_curve": [
+                {"length": 2.0, "metrics": {"hit@10": 0.08, "ndcg@10": 0.06}, "status": "completed"},
+                {"length": 4.0, "metrics": {"hit@10": 0.10, "ndcg@10": 0.08}, "status": "completed"},
+            ],
+            "variable_bracketed": [
+                {
+                    "strategy": "residual",
+                    "phase": "1.5",
+                    "mean_length": 3.0,
+                    "weighted_length": 3.0,
+                    "token_savings_pct": 25.0,
+                    "status": "completed",
+                    "metrics": {"hit@10": 0.098, "ndcg@10": 0.078},
+                    "interp_metrics": {"hit@10": 0.090, "ndcg@10": 0.070},
+                    "delta_interp": {"hit@10": 8.9, "ndcg@10": 11.4},
+                    "pareto_status": "★ Dominant",
+                }
+            ],
+        }
+        h2h_data = {"residual": {"delta_hit10": 0.70, "delta_ndcg10": 0.40}}
+
+        with patch.dict("sys.modules", {"matplotlib": mock_matplotlib, "matplotlib.pyplot": mock_plt}):
+            res = mod.generate_comparison_plot(
+                rd_data=rd_data,
+                dataset="Instruments",
+                model_name="LETTER-TIGER",
+                out_png_path="/tmp/test_strategy_comparison.png",
+                h2h_data=h2h_data,
+                max_length=4,
+            )
+            self.assertTrue(res)
+
+            # Verify 4-panel subplots created
+            mock_plt.subplots.assert_called_once_with(2, 2, figsize=(13, 10), dpi=300)
+
+            # Verify Panel 1 & Panel 2 (NDCG@10 and Hit@10 plots)
+            self.assertTrue(mock_ax1.plot.called)
+            self.assertTrue(mock_ax1.scatter.called)
+            self.assertTrue(mock_ax2.plot.called)
+            self.assertTrue(mock_ax2.scatter.called)
+
+            # Verify Panel 3 (Token Savings barh)
+            self.assertTrue(mock_ax3.barh.called)
+            self.assertTrue(mock_ax3.text.called)
+
+            # Verify Panel 4 (Rate-distortion surplus barh)
+            self.assertTrue(mock_ax4.barh.called)
+            self.assertTrue(mock_ax4.text.called)
+
+            # Verify savefig called with 300 dpi and tight layout
+            mock_fig.savefig.assert_called_once_with(
+                "/tmp/test_strategy_comparison.png", dpi=300, bbox_inches="tight"
+            )
+            mock_plt.close.assert_called_once_with(mock_fig)
+
+    def test_rate_distortion_report_end_to_end_with_plot_and_no_plot(self):
+        from unittest.mock import MagicMock, patch
+        spec = importlib.util.spec_from_file_location(
+            "generate_comparison_report",
+            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            dataset = "PlotTestDS"
+            data_dir = tmp_path / "data" / dataset
+            data_dir.mkdir(parents=True, exist_ok=True)
+            res_dir = tmp_path / "LETTER-TIGER" / "results" / dataset / "rqvae"
+            res_dir.mkdir(parents=True, exist_ok=True)
+
+            with open(data_dir / f"{dataset}.index.json", "w") as f:
+                json.dump({"0": [1, 2, 3, 4], "1": [2, 3, 4, 5]}, f)
+            with open(data_dir / f"{dataset}.inter.json", "w") as f:
+                json.dump({"0": [0, 1]}, f)
+
+            with open(res_dir / "fixed_L2.json", "w") as f:
+                json.dump({"mean_results": {"hit@1": 0.03, "hit@5": 0.06, "hit@10": 0.08, "ndcg@5": 0.05, "ndcg@10": 0.06}}, f)
+            with open(res_dir / "fixed.json", "w") as f:
+                json.dump({"mean_results": {"hit@1": 0.05, "hit@5": 0.08, "hit@10": 0.10, "ndcg@5": 0.07, "ndcg@10": 0.08}}, f)
+
+            tok_dir = data_dir / "rqvae"
+            tok_dir.mkdir(parents=True, exist_ok=True)
+            with open(tok_dir / f"{dataset}.index.varlen.res-phase1.5.json", "w") as f:
+                json.dump({"0": [1, 2, 3], "1": [2, 3, 4]}, f)
+            with open(res_dir / "varlen-res_phase1.5.json", "w") as f:
+                json.dump({"mean_results": {"hit@1": 0.048, "hit@5": 0.078, "hit@10": 0.098, "ndcg@5": 0.068, "ndcg@10": 0.078}}, f)
+
+            mock_plt = MagicMock()
+            mock_fig = MagicMock()
+            mock_ax1, mock_ax2, mock_ax3, mock_ax4 = MagicMock(), MagicMock(), MagicMock(), MagicMock()
+            for ax in [mock_ax1, mock_ax2, mock_ax3, mock_ax4]:
+                ax.get_legend_handles_labels.return_value = ([], [])
+            mock_plt.subplots.return_value = (mock_fig, [[mock_ax1, mock_ax2], [mock_ax3, mock_ax4]])
+
+            class MockRect:
+                def get_width(self): return 10.0
+                def get_y(self): return 0.0
+                def get_height(self): return 0.5
+
+            mock_ax3.barh.return_value = [MockRect()]
+            mock_ax4.barh.return_value = [MockRect()]
+
+            def side_effect_savefig(path, **kwargs):
+                with open(path, "wb") as f:
+                    f.write(b"fake_png_data")
+
+            mock_fig.savefig.side_effect = side_effect_savefig
+
+            mock_matplotlib = MagicMock()
+            mock_matplotlib.pyplot = mock_plt
+
+            # 1. Run with plotting enabled
+            orig_argv = sys.argv
+            try:
+                sys.argv = [
+                    "generate_comparison_report.py",
+                    "--dataset", dataset,
+                    "--repo-root", str(tmp_path),
+                    "--phase", "1.5",
+                    "--tokenizer", "rqvae",
+                    "--strategies", "fixed,residual",
+                ]
+                with patch.dict("sys.modules", {"matplotlib": mock_matplotlib, "matplotlib.pyplot": mock_plt}):
+                    mod.main()
+
+                plot_png = res_dir / f"strategy_comparison_{dataset}_phase1.5.png"
+                alias_png = res_dir / f"rate_distortion_frontier_{dataset}_phase1.5.png"
+                self.assertTrue(plot_png.exists())
+                self.assertTrue(alias_png.exists())
+
+                md_file = res_dir / f"strategy_comparison_phase1.5.md"
+                with open(md_file) as f:
+                    md_text = f.read()
+
+                # Verify markdown embeds the strategy comparison plot
+                self.assertIn(f"![Strategy Comparison Plot]({plot_png.name})", md_text)
+                self.assertIn("### Performance & Rate-Distortion Overview", md_text)
+
+            finally:
+                sys.argv = orig_argv
+
+            # 2. Run with --no-plot
+            orig_argv = sys.argv
+            try:
+                if plot_png.exists(): plot_png.unlink()
+                if alias_png.exists(): alias_png.unlink()
+
+                sys.argv = [
+                    "generate_comparison_report.py",
+                    "--dataset", dataset,
+                    "--repo-root", str(tmp_path),
+                    "--phase", "1.5",
+                    "--tokenizer", "rqvae",
+                    "--strategies", "fixed,residual",
+                    "--no-plot",
+                ]
+                mod.main()
+
+                # Verify no plot was created
+                self.assertFalse(plot_png.exists())
+                self.assertFalse(alias_png.exists())
+
+                with open(md_file) as f:
+                    md_text = f.read()
+                self.assertNotIn("![Strategy Comparison Plot]", md_text)
+            finally:
+                sys.argv = orig_argv
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
