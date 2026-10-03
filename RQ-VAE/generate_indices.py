@@ -81,6 +81,22 @@ def parse_args():
         dest='target_lengths',
         help='Path to target lengths JSON or index file override for Phase 1.5.',
     )
+    parser.add_argument(
+        '--residual-threshold',
+        '--residual_threshold',
+        type=float,
+        default=None,
+        dest='residual_threshold',
+        help='Residual threshold for dynamic length halting.',
+    )
+    parser.add_argument(
+        '--min-length',
+        '--min_length',
+        type=int,
+        default=None,
+        dest='min_length',
+        help='Minimum length for dynamic length halting.',
+    )
 
     return parser.parse_args()
 
@@ -157,6 +173,13 @@ def constrained_km(data, n_clusters=10):
     t_labels = torch.from_numpy(clf.labels_).tolist()
     return t_centers, t_labels
 
+labels = {str(i): [] for i in range(len(model.rq.vq_layers))}
+if getattr(model, "beta", 0) > 0:
+    embs  = [layer.embedding.weight.cpu().detach().numpy() for layer in model.rq.vq_layers]
+    for idx, emb in enumerate(embs):
+        centers, label = constrained_km(emb)
+        labels[str(idx)] = label
+
 ckpt_phase = float(ckpt.get("phase", get_arg("phase", 1.0)))
 if args_setting.phase is not None:
     phase_mode = float(args_setting.phase)
@@ -168,13 +191,21 @@ if phase_mode == 1.5:
     if args_setting.target_lengths:
         from truncate_indices import resolve_target_lengths
         target_lengths = resolve_target_lengths(len(data), target_lengths=args_setting.target_lengths)
-    elif ckpt.get("residual_threshold") is not None:
-        thresh = float(ckpt["residual_threshold"])
-        min_len = int(ckpt.get("min_length", 1))
+    elif args_setting.residual_threshold is not None or ckpt.get("residual_threshold") is not None:
+        thresh = float(
+            args_setting.residual_threshold
+            if args_setting.residual_threshold is not None
+            else ckpt["residual_threshold"]
+        )
+        min_len = int(
+            args_setting.min_length
+            if args_setting.min_length is not None
+            else ckpt.get("min_length", 1)
+        )
         print(f"[Phase 1.5] Recomputing item lengths in eval() mode using saved weights (residual_threshold={thresh}, min_length={min_len})...")
         dynamic_lens = {}
         with torch.no_grad():
-            for d in data_loader:
+            for d in tqdm(data_loader, desc="[Phase 1.5] Dynamic lengths"):
                 xs, e_idx = d[0].to(device), d[1]
                 _, d_lens = model.get_indices(
                     xs, labels, residual_threshold=thresh, min_length=min_len, return_lengths=True
@@ -193,13 +224,6 @@ if phase_mode == 1.5:
 
     if target_lengths:
         print(f"[Phase 1.5] Generating variable-length IDs with {len(target_lengths)} target lengths.")
-
-labels = {str(i): [] for i in range(len(model.rq.vq_layers))}
-if getattr(model, "beta", 0) > 0:
-    embs  = [layer.embedding.weight.cpu().detach().numpy() for layer in model.rq.vq_layers]
-    for idx, emb in enumerate(embs):
-        centers, label = constrained_km(emb)
-        labels[str(idx)] = label
 
 current_item = 0
 for d in tqdm(data_loader):

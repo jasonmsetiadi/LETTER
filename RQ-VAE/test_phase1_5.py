@@ -42,7 +42,15 @@ except ImportError:
 
     nn.Module = MockModule
     nn.ModuleList = list
-    nn.Embedding = MagicMock
+    torch.optim = MagicMock()
+    sys.modules["torch.optim"] = torch.optim
+    class MockEmbedding(MagicMock):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.weight = MagicMock()
+            self.weight.data = MagicMock()
+            self.weight.data.uniform_ = MagicMock()
+    nn.Embedding = MockEmbedding
 
     nn_init.xavier_normal_ = MagicMock()
     nn_init.constant_ = MagicMock()
@@ -235,6 +243,10 @@ class TestPhase15Quantizer(unittest.TestCase):
 
 
 class TestPhase15Trainer(unittest.TestCase):
+    def setUp(self):
+        if not HAS_TORCH:
+            self.skipTest("PyTorch is required for Trainer tests")
+
     def test_trainer_target_lengths_initialization(self):
         # Ensure RQ-VAE's utils is imported rather than LETTER-TIGER's utils
         if "utils" in sys.modules and not hasattr(sys.modules["utils"], "set_color"):
@@ -1135,8 +1147,93 @@ class TestPhase15Reporting(unittest.TestCase):
             self.assertEqual(max_l, 5)
 
 
+
+class TestGenerateIndicesResidual(unittest.TestCase):
+    def test_generate_indices_residual_phase1_5(self):
+        if not hasattr(torch, "__file__") or isinstance(torch, MagicMock) or not hasattr(torch, "save") or not hasattr(torch, "Tensor"):
+            self.skipTest("Real PyTorch is required for generate_indices test")
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            emb_path = tmp_path / "test_emb.npy"
+            np.save(str(emb_path), np.random.randn(8, 32).astype(np.float32))
+
+            dummy_model = RQVAE(
+                in_dim=32,
+                num_emb_list=[8, 8, 8],
+                e_dim=16,
+                layers=[24, 16],
+                dropout_prob=0.0,
+                bn=False,
+                loss_type="mse",
+                quant_loss_weight=1.0,
+                kmeans_init=False,
+                kmeans_iters=10,
+                beta=0.0,
+            )
+
+            ckpt_path = tmp_path / "model_ckpt.pth"
+            ckpt = {
+                "args": {
+                    "data_path": str(emb_path),
+                    "num_emb_list": [8, 8, 8],
+                    "e_dim": 16,
+                    "layers": [24, 16],
+                    "dropout_prob": 0.0,
+                    "bn": False,
+                    "loss_type": "mse",
+                    "quant_loss_weight": 1.0,
+                    "kmeans_init": False,
+                    "kmeans_iters": 10,
+                    "sk_epsilons": None,
+                    "sk_iters": 10,
+                    "num_workers": 0,
+                    "phase": 1.5,
+                    "residual_threshold": 0.2,
+                    "min_length": 1,
+                    "beta": 0.0,
+                },
+                "state_dict": dummy_model.state_dict(),
+                "phase": 1.5,
+                "residual_threshold": 0.2,
+                "min_length": 1,
+            }
+            torch.save(ckpt, str(ckpt_path))
+
+            out_index = tmp_path / "out.index.json"
+            gen_script = Path(__file__).resolve().parent / "generate_indices.py"
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(gen_script),
+                    "--dataset", "TestDS",
+                    "--checkpoint-path", str(ckpt_path),
+                    "--output-file", str(out_index),
+                    "--device", "cpu",
+                    "--phase", "1.5",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                proc.returncode,
+                0,
+                f"generate_indices.py failed with stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}",
+            )
+            self.assertTrue(out_index.exists())
+            with open(out_index, "r") as f:
+                indices_data = json.load(f)
+            self.assertEqual(len(indices_data), 8)
+            for k, tokens in indices_data.items():
+                self.assertGreaterEqual(len(tokens), 1)
+                self.assertLessEqual(len(tokens), 3)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 
 
