@@ -59,11 +59,6 @@ def parse_args():
         help="Tokenizer type: rqvae or letter (default: rqvae).",
     )
     parser.add_argument(
-        "--no-merge",
-        action="store_true",
-        help="Do not merge with existing strategy_comparison.json or auto-discover existing result files.",
-    )
-    parser.add_argument(
         "--no-pairwise-sid",
         action="store_true",
         help="Do not compute pairwise Semantic ID agreement and length divergence tables.",
@@ -234,20 +229,6 @@ def autodetect_max_length_and_fixed_depths(
             # unadorned fixed.json
             if fname == "fixed.json":
                 discovered_depths.add(4)
-
-            # Existing strategy_comparison report JSON
-            if fname.startswith("strategy_comparison") and fname.endswith(".json"):
-                try:
-                    with open(os.path.join(report_dir, fname), encoding="utf-8") as f:
-                        sc_data = json.load(f)
-                    if isinstance(sc_data, dict):
-                        if "max_length" in sc_data and isinstance(sc_data["max_length"], int):
-                            discovered_depths.add(sc_data["max_length"])
-                        for fc in sc_data.get("fixed_curve", []):
-                            if "length" in fc:
-                                discovered_depths.add(int(fc["length"]))
-                except Exception:
-                    pass
 
     # 2. Scan dataset index files in data_root/dataset and data_root/dataset/tokenizer
     if data_root and dataset:
@@ -518,19 +499,63 @@ def generate_rate_distortion_plot(
         "shortest_unique": "#e67e22",      # orange
         "residual": "#27ae60",             # emerald green
         "popularity:frequency": "#2980b9", # blue
-        "popularity": "#2980b9",           # blue
         "user_entropy": "#8e44ad",         # purple
         "entropy": "#8e44ad",              # purple
         "pagerank": "#16a085",             # teal
+        "pr": "#16a085",                   # teal
         "co_occurrence": "#d35400",        # rust/dark orange
         "cooccur": "#d35400",              # rust/dark orange
+        "co_occur": "#d35400",             # rust/dark orange
         "cf_density": "#c0392b",           # deep red
+        "cf": "#c0392b",                   # deep red
+        "popularity": "#2980b9",           # blue (fallback for vanilla popularity)
     }
 
     def get_color(strat_name):
-        for k, col in palette.items():
+        # 1. Check structured popularity/collaborative signals or varlen prefixes
+        sig = None
+        if strat_name.startswith("popularity:") or strat_name.startswith("collaborative:"):
+            sig = strat_name.split(":", 1)[1].strip()
+        elif strat_name.startswith("varlen-pop-"):
+            sig = strat_name[len("varlen-pop-"):].split("_")[0].split("-")[0].strip()
+
+        if sig is not None:
+            signal_palette = {
+                "frequency": "#2980b9",     # blue
+                "raw": "#2980b9",
+                "pop": "#2980b9",
+                "user_entropy": "#8e44ad", # purple
+                "entropy": "#8e44ad",
+                "pagerank": "#16a085",     # teal
+                "pr": "#16a085",
+                "co_occurrence": "#d35400",# rust/dark orange
+                "cooccur": "#d35400",
+                "co_occur": "#d35400",
+                "cooccurrence": "#d35400",
+                "cf_density": "#c0392b",   # deep red
+                "cf": "#c0392b",
+            }
+            if sig in signal_palette:
+                return signal_palette[sig]
+
+        # 2. Match specific signals before generic "popularity" prefix
+        specific_keys = [
+            "shortest_unique",
+            "residual",
+            "popularity:frequency",
+            "user_entropy",
+            "entropy",
+            "pagerank",
+            "-pr",
+            "co_occurrence",
+            "cooccur",
+            "cf_density",
+            "-cf",
+            "popularity",
+        ]
+        for k in specific_keys:
             if k in strat_name:
-                return col
+                return palette.get(k.lstrip("-"), "#7f8c8d")
         return "#7f8c8d"
 
     # 4 Panels: Hit@10, NDCG@10, Hit@5, NDCG@5
@@ -619,15 +644,7 @@ def generate_rate_distortion_plot(
         return False
 
 
-def generate_comparison_plot(rd_data, dataset, model_name, out_png_path, **kwargs):
-    """Backward-compatible alias for generate_rate_distortion_plot."""
-    return generate_rate_distortion_plot(
-        rd_data=rd_data,
-        dataset=dataset,
-        model_name=model_name,
-        out_png_path=out_png_path,
-        **kwargs,
-    )
+generate_comparison_plot = generate_rate_distortion_plot
 
 
 def main():
@@ -678,62 +695,8 @@ def main():
             report_json = os.path.join(report_dir, f"strategy_comparison{tag}.json")
             report_md = os.path.join(report_dir, f"strategy_comparison{tag}.md")
 
-        existing_entries = {}
-        existing_sid_entries = {}
-        existing_pairwise_match = {}
-        existing_pairwise_mae = {}
-
-        json_cands = [report_json]
-        if target_phase in ("both", "all"):
-            p15_json = os.path.join(report_dir, f"strategy_comparison_phase1.5{tag}.json")
-            if p15_json != report_json and os.path.isfile(p15_json):
-                json_cands.append(p15_json)
-
-        if not args.no_merge:
-            for jf in json_cands:
-                if os.path.isfile(jf):
-                    try:
-                        with open(jf, encoding="utf-8") as f:
-                            prev_raw = json.load(f)
-                        prev_list = (
-                            prev_raw.get("strategy_comparison", prev_raw.get("recommendation_metrics", prev_raw))
-                            if isinstance(prev_raw, dict)
-                            else prev_raw
-                        )
-                        if isinstance(prev_list, list):
-                            for item in prev_list:
-                                if isinstance(item, dict) and "strategy" in item:
-                                    s_name = item["strategy"]
-                                    if s_name == "popularity":
-                                        s_name = "popularity:frequency"
-                                    s_ph = str(item.get("phase", "fixed" if s_name == "fixed" else "1"))
-                                    existing_entries[(s_name, s_ph)] = item
-                                    if s_name not in existing_entries:
-                                        existing_entries[s_name] = item
-
-                        if isinstance(prev_raw, dict):
-                            sid_list = prev_raw.get("semantic_id_metrics", prev_raw.get("semantic_id_evaluation", []))
-                            if isinstance(sid_list, list):
-                                for item in sid_list:
-                                    if isinstance(item, dict) and "strategy" in item:
-                                        s_name = item["strategy"]
-                                        if s_name == "popularity":
-                                            s_name = "popularity:frequency"
-                                        s_ph = str(item.get("phase", "fixed" if s_name == "fixed" else "1"))
-                                        existing_sid_entries[(s_name, s_ph)] = item
-                                        if s_name not in existing_sid_entries:
-                                            existing_sid_entries[s_name] = item
-                            p_match = prev_raw.get("pairwise_exact_match_pct", {})
-                            for k, v in p_match.items():
-                                existing_pairwise_match.setdefault(k, {}).update(v)
-                            p_mae = prev_raw.get("pairwise_mae_tokens", {})
-                            for k, v in p_mae.items():
-                                existing_pairwise_mae.setdefault(k, {}).update(v)
-                    except Exception:
-                        pass
-
         discovered_items = []
-        if not args.no_merge and os.path.isdir(report_dir):
+        if os.path.isdir(report_dir):
             for fname in sorted(os.listdir(report_dir)):
                 res = file_to_strategy(fname, tag)
                 if res and res not in discovered_items:
@@ -768,7 +731,7 @@ def main():
 
         has_collab_expanded = any(
             isinstance(k, tuple) and k[0].startswith("popularity:") and k[0] != "popularity:frequency"
-            for k in list(existing_entries.keys()) + discovered_items
+            for k in discovered_items
         )
 
         combined_items = []
@@ -796,7 +759,7 @@ def main():
             if target_phase == "1.5":
                 add_entry(s, "1.5")
             elif target_phase in ("both", "all"):
-                if (s, "1.5") in discovered_items or (s, "1.5") in existing_entries or check_has_index(s, "1.5"):
+                if (s, "1.5") in discovered_items or check_has_index(s, "1.5"):
                     add_entry(s, "1.5")
 
         for itm in discovered_items:
@@ -806,10 +769,6 @@ def main():
         for d in detected_depths:
             if d != max_length:
                 add_entry(f"fixed_L{d}", "fixed")
-
-        for k in existing_entries:
-            if isinstance(k, tuple):
-                add_entry(k[0], k[1])
 
         if ("fixed", "fixed") in combined_items and (f"fixed_L{max_length}", "fixed") in combined_items:
             combined_items.remove((f"fixed_L{max_length}", "fixed"))
@@ -828,7 +787,6 @@ def main():
                 max_length=max_length,
                 strategies=combined_items,
                 pairwise=not args.no_pairwise_sid,
-                existing_sid_entries=existing_sid_entries,
             )
         except Exception as e:
             print(f"[Warning] Semantic ID evaluation failed: {e}", file=sys.stderr)
@@ -870,17 +828,9 @@ def main():
                 except Exception:
                     status = "error"
 
-            prev_row = existing_entries.get((strat, phase)) or existing_entries.get(strat)
-            if prev_row:
-                if status != "completed" and prev_row.get("status") == "completed":
-                    metrics = prev_row.get("metrics", {})
-                    status = "completed"
-
             sid_metric = (
                 sid_results_map.get((strat, phase))
-                or sid_results_map.get(strat)
-                or existing_sid_entries.get((strat, phase))
-                or existing_sid_entries.get(strat, {})
+                or sid_results_map.get(strat, {})
             )
             mean_l = sid_metric.get("mean_length")
             w_mean_l = sid_metric.get("traffic_weighted_length") or sid_metric.get("weighted_length")
@@ -890,13 +840,6 @@ def main():
             rho = sid_metric.get("spearman_rho_vs_frequency")
             label = sid_metric.get("label", strat)
             basis = sid_metric.get("basis", "")
-
-            if mean_l is None and prev_row:
-                mean_l = prev_row.get("mean_length")
-            if w_mean_l is None and prev_row:
-                w_mean_l = prev_row.get("weighted_length")
-            if collisions == 0 and prev_row:
-                collisions = prev_row.get("collisions", 0)
 
             if strat == "fixed" and mean_l is None:
                 mean_l = float(max_length)
@@ -937,20 +880,6 @@ def main():
 
         pairwise_match = sid_eval.get("pairwise_exact_match_pct", {})
         pairwise_mae = sid_eval.get("pairwise_mae_tokens", {})
-        if existing_pairwise_match:
-            for s1, m_dict in existing_pairwise_match.items():
-                if s1 not in pairwise_match:
-                    pairwise_match[s1] = dict(m_dict)
-                else:
-                    for s2, val in m_dict.items():
-                        pairwise_match[s1].setdefault(s2, val)
-        if existing_pairwise_mae:
-            for s1, m_dict in existing_pairwise_mae.items():
-                if s1 not in pairwise_mae:
-                    pairwise_mae[s1] = dict(m_dict)
-                else:
-                    for s2, val in m_dict.items():
-                        pairwise_mae[s1].setdefault(s2, val)
 
         # Compute Rate-Distortion Pareto Frontier
         rd_data = compute_rate_distortion_frontier(recom_table_data, max_length=max_length)

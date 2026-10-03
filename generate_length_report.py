@@ -282,7 +282,7 @@ def main():
 
         # Plot generation
         plot_saved = False
-        plot_fname = f"experiment_summary_{dataset}.png"
+        plot_fname = f"fixed_length_comparison_{dataset}.png"
         plot_png_path = os.path.join(out_dir, plot_fname)
         if not args.no_plot:
             plot_saved = generate_length_plot(
@@ -293,13 +293,6 @@ def main():
                 tested_lengths=tested_lengths,
                 out_png_path=plot_png_path,
             )
-            if plot_saved and len(tokenizers) > 1:
-                alias_png = os.path.join(out_dir, f"fixed_length_comparison_{dataset}.png")
-                try:
-                    import shutil
-                    shutil.copyfile(plot_png_path, alias_png)
-                except Exception:
-                    pass
 
         # Markdown report
         tok_display_list = ", ".join(f"`{get_tokenizer_label(t)}`" for t in tokenizers)
@@ -390,17 +383,11 @@ def main():
                 md_lines.append(f"| {l} | " + " | ".join(vals) + f" | **{best_label}** |")
             md_lines.append("")
 
-        report_fname = f"experiment_summary_{dataset}.md"
+        report_fname = f"fixed_length_comparison_{dataset}.md"
         summary_md_path = os.path.join(out_dir, report_fname)
         with open(summary_md_path, "w", encoding="utf-8") as mf:
             mf.write("\n".join(md_lines) + "\n")
         print(f"Markdown table saved to: {summary_md_path}\n")
-
-        # Also write fixed_length_comparison_{dataset}.md if multi-tokenizer
-        if len(tokenizers) > 1:
-            alias_path = os.path.join(out_dir, f"fixed_length_comparison_{dataset}.md")
-            with open(alias_path, "w", encoding="utf-8") as mf:
-                mf.write("\n".join(md_lines) + "\n")
 
 
 if __name__ == "__main__":
