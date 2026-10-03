@@ -1172,6 +1172,119 @@ class TestPhase15Reporting(unittest.TestCase):
             )
             self.assertEqual(max_l, 5)
 
+            # Case 6: Summary file detection
+            (report_dir / "experiment_summary_TestDS.md").write_text(
+                "| Model | Mode | Max L | Mean L | Hit@1 | Hit@5 | Hit@10 | NDCG@5 | NDCG@10 |\n"
+                "| tiger | fixed | 2 | 2.0 | 3.0% | 6.0% | 8.0% | 5.0% | 6.0% |\n"
+                "| tiger | fixed | 6 | 6.0 | 6.0% | 9.0% | 11.0% | 8.0% | 9.0% |\n"
+            )
+            max_l, tag, depths = mod.autodetect_max_length_and_fixed_depths(
+                str(report_dir), str(tmp_path / "data"), "TestDS", "rqvae"
+            )
+            self.assertIn(2, depths)
+            self.assertIn(6, depths)
+
+    def test_find_fixed_metrics_from_summaries(self):
+        spec = importlib.util.spec_from_file_location(
+            "generate_comparison_report",
+            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            md_content = (
+                "| Model | Mode | Max L | Mean L | Hit@1 | Hit@5 | Hit@10 | NDCG@5 | NDCG@10 |\n"
+                "| tiger | fixed | 2 | 2.0 | 3.5% | 6.2% | 8.1% | 5.3% | 6.7% |\n"
+            )
+            (tmp_path / "experiment_summary_TestDS.md").write_text(md_content)
+            metrics = mod.find_fixed_metrics_from_summaries([str(tmp_path)], depth=2, dataset="TestDS")
+            self.assertIsNotNone(metrics)
+            self.assertAlmostEqual(metrics["hit@1"], 0.035)
+            self.assertAlmostEqual(metrics["ndcg@10"], 0.067)
+
+    def test_generate_length_comparison_plot_with_fixed_line_and_strategy_scatter(self):
+        from unittest.mock import MagicMock, patch
+        spec = importlib.util.spec_from_file_location(
+            "generate_comparison_report",
+            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        rd_data = {
+            "fixed_curve": [
+                {
+                    "length": 2,
+                    "strategy": "fixed_L2",
+                    "mean_length": 2.0,
+                    "status": "completed",
+                    "metrics": {"hit@1": 0.03, "hit@5": 0.06, "hit@10": 0.08, "ndcg@5": 0.05, "ndcg@10": 0.06},
+                },
+                {
+                    "length": 4,
+                    "strategy": "fixed",
+                    "mean_length": 4.0,
+                    "status": "completed",
+                    "metrics": {"hit@1": 0.05, "hit@5": 0.08, "hit@10": 0.10, "ndcg@5": 0.07, "ndcg@10": 0.08},
+                },
+            ],
+            "variable_bracketed": [
+                {
+                    "strategy": "residual",
+                    "phase": "1.5",
+                    "mean_length": 3.2,
+                    "status": "completed",
+                    "metrics": {"hit@1": 0.048, "hit@5": 0.078, "hit@10": 0.098, "ndcg@5": 0.068, "ndcg@10": 0.078},
+                }
+            ],
+            "pareto_points": [],
+            "summary": {},
+        }
+
+        mock_plt = MagicMock()
+        mock_fig = MagicMock()
+        mock_ax1 = MagicMock()
+        mock_ax2 = MagicMock()
+        mock_ax3 = MagicMock()
+        mock_ax4 = MagicMock()
+        for ax in [mock_ax1, mock_ax2, mock_ax3, mock_ax4]:
+            ax.get_legend_handles_labels.return_value = ([], [])
+        mock_axes = [[mock_ax1, mock_ax2], [mock_ax3, mock_ax4]]
+        mock_plt.subplots.return_value = (mock_fig, mock_axes)
+
+        mock_matplotlib = MagicMock()
+        mock_matplotlib.pyplot = mock_plt
+
+        with patch.dict("sys.modules", {"matplotlib": mock_matplotlib, "matplotlib.pyplot": mock_plt}):
+            out_file = "/tmp/test_length_plot.png"
+            success = mod.generate_length_comparison_plot(
+                rd_data=rd_data,
+                dataset="TestDS",
+                model_name="tiger",
+                out_png_path=out_file,
+                phase=None,
+                max_length=4,
+            )
+            self.assertTrue(success)
+            # Verify ax.plot was called for the fixed baseline curve on ax1 (Hit@10)
+            self.assertTrue(mock_ax1.plot.called)
+            plot_args = mock_ax1.plot.call_args[0]
+            self.assertEqual(plot_args[0], [2, 4])
+            self.assertEqual(plot_args[1], [8.0, 10.0])
+            self.assertEqual(mock_ax1.plot.call_args[1].get("label"), "Fixed Baseline")
+
+            # Verify ax.scatter was called for variable strategy
+            self.assertTrue(mock_ax1.scatter.called)
+            scatter_args = mock_ax1.scatter.call_args[0]
+            self.assertEqual(scatter_args[0], 3.2)
+            self.assertAlmostEqual(scatter_args[1], 9.8)
+
+            # Verify savefig was called
+            mock_fig.savefig.assert_called_once()
+
+
 
 
 class TestGenerateIndicesResidual(unittest.TestCase):

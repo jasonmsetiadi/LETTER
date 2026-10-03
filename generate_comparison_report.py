@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -200,6 +201,76 @@ def item_sort_key(item, max_length=4):
     return (base[0], base[1], base[2], strat, phase_order)
 
 
+def find_fixed_metrics_from_summaries(cand_dirs, depth, dataset):
+    """
+    Fallback parser to retrieve fixed-length baseline metrics for a specific depth
+    from experiment_summary or strategy_comparison summary tables when individual JSON is absent.
+    """
+    for cdir in cand_dirs:
+        if not cdir or not os.path.isdir(cdir):
+            continue
+        cand_files = []
+        for fn in os.listdir(cdir):
+            if fn.startswith("experiment_summary") and (fn.endswith(".md") or fn.endswith(".txt")):
+                cand_files.append(os.path.join(cdir, fn))
+            elif fn.startswith("strategy_comparison") and fn.endswith(".txt"):
+                cand_files.append(os.path.join(cdir, fn))
+
+        for fpath in cand_files:
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line_str = line.strip()
+                        if not line_str.startswith("|") or "hit@" in line_str.lower() or "---" in line_str:
+                            continue
+                        parts = [p.strip().replace("*", "") for p in line_str.split("|")[1:-1]]
+                        if not parts:
+                            continue
+                        # Case A: experiment_summary table: | Model | Mode | Max L | Mean L | Hit@1 | Hit@5 | Hit@10 | NDCG@5 | NDCG@10 | Status |
+                        if len(parts) >= 8 and parts[1].lower() == "fixed":
+                            try:
+                                d_row = int(float(parts[2]))
+                                if d_row == depth:
+                                    def parse_pct(s):
+                                        s = s.strip().rstrip("%")
+                                        return float(s) / 100.0 if s and s != "-" else None
+                                    h1 = parse_pct(parts[4])
+                                    h5 = parse_pct(parts[5])
+                                    h10 = parse_pct(parts[6])
+                                    n5 = parse_pct(parts[7])
+                                    n10 = parse_pct(parts[8]) if len(parts) > 8 else None
+                                    if h10 is not None or n10 is not None:
+                                        return {
+                                            "hit@1": h1, "hit@5": h5, "hit@10": h10,
+                                            "ndcg@5": n5, "ndcg@10": n10,
+                                        }
+                            except Exception:
+                                pass
+                        # Case B: strategy_comparison table: | fixed | Mean L | W-Mean L | Coll | Hit@1 | Hit@5 | Hit@10 | NDCG@5 | NDCG@10 |
+                        elif parts[0].lower() == "fixed" and len(parts) >= 8:
+                            try:
+                                d_row = int(float(parts[1]))
+                                if d_row == depth:
+                                    def parse_pct(s):
+                                        s = s.strip().rstrip("%")
+                                        return float(s) / 100.0 if s and s != "-" else None
+                                    h1 = parse_pct(parts[4])
+                                    h5 = parse_pct(parts[5])
+                                    h10 = parse_pct(parts[6])
+                                    n5 = parse_pct(parts[7])
+                                    n10 = parse_pct(parts[8]) if len(parts) > 8 else None
+                                    if h10 is not None or n10 is not None:
+                                        return {
+                                            "hit@1": h1, "hit@5": h5, "hit@10": h10,
+                                            "ndcg@5": n5, "ndcg@10": n10,
+                                        }
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+    return None
+
+
 def autodetect_max_length_and_fixed_depths(
     report_dir,
     data_root,
@@ -253,6 +324,26 @@ def autodetect_max_length_and_fixed_depths(
             # Existing strategy_comparison report files
             if fname in ("strategy_comparison.json", "strategy_comparison.md"):
                 discovered_depths.add(4)
+
+            # Check experiment_summary files for evaluated depths
+            if fname.startswith("experiment_summary") and (fname.endswith(".md") or fname.endswith(".txt")):
+                try:
+                    with open(os.path.join(sdir, fname), encoding="utf-8") as f:
+                        for line in f:
+                            m_ev = re.search(r"Evaluated Depths.*:([\d\s,]+)", line, re.IGNORECASE)
+                            if m_ev:
+                                for dp in m_ev.group(1).split(","):
+                                    if dp.strip().isdigit():
+                                        discovered_depths.add(int(dp.strip()))
+                            parts = [p.strip().replace("*", "") for p in line.split("|")[1:-1]]
+                            if len(parts) >= 8 and parts[1].lower() == "fixed":
+                                try:
+                                    d_row = int(float(parts[2]))
+                                    discovered_depths.add(d_row)
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
 
     # 2. Scan dataset index files in data_root/dataset and data_root/dataset/tokenizer
     if data_root and dataset:
@@ -337,6 +428,7 @@ def compute_rate_distortion_frontier(recom_table_data, max_length=4):
                         "strategy": strat,
                         "mean_length": d,
                         "metrics": row.get("metrics", {}),
+                        "status": "completed",
                     })
 
     fixed_curve.sort(key=lambda x: x["length"])
@@ -500,7 +592,7 @@ def generate_rate_distortion_plot(
         var_list = all_var_list
 
     has_var_data = any(v.get("status") == "completed" for v in var_list)
-    has_fixed_data = any(f.get("status") == "completed" for f in fixed_curve)
+    has_fixed_data = any(f.get("status") == "completed" or f.get("metrics") for f in fixed_curve)
     if not has_fixed_data and not has_var_data:
         return False
 
@@ -599,7 +691,8 @@ def generate_rate_distortion_plot(
     for ax, metric_key, metric_label in metric_panels:
         valid_fixed = [
             f for f in fixed_curve
-            if f.get("status") == "completed" and f.get("metrics", {}).get(metric_key) is not None
+            if f.get("metrics", {}).get(metric_key) is not None
+            and f.get("status", "completed") == "completed"
         ]
         valid_fixed.sort(key=lambda x: x["length"])
         if valid_fixed:
@@ -715,7 +808,7 @@ def generate_length_comparison_plot(
         var_list = all_var_list
 
     has_var_data = any(v.get("status") == "completed" for v in var_list)
-    has_fixed_data = any(f.get("status") == "completed" for f in fixed_curve)
+    has_fixed_data = any(f.get("status") == "completed" or f.get("metrics") for f in fixed_curve)
     if not has_fixed_data and not has_var_data:
         return False
 
@@ -811,7 +904,8 @@ def generate_length_comparison_plot(
     for ax, metric_key, metric_label in metric_panels:
         valid_fixed = [
             f for f in fixed_curve
-            if f.get("status") == "completed" and f.get("metrics", {}).get(metric_key) is not None
+            if f.get("metrics", {}).get(metric_key) is not None
+            and f.get("status", "completed") == "completed"
         ]
         valid_fixed.sort(key=lambda x: x["length"])
         if valid_fixed:
@@ -1107,6 +1201,19 @@ def generate_report_for_max_length(
                 status = "completed"
             except Exception:
                 status = "error"
+
+        if (not metrics or status != "completed") and strat == "fixed":
+            summary_m = find_fixed_metrics_from_summaries(cand_dirs, max_length, dataset)
+            if summary_m:
+                metrics = summary_m
+                status = "completed"
+        elif (not metrics or status != "completed") and strat.startswith("fixed_L"):
+            d_val = int(strat[7:]) if strat[7:].isdigit() else None
+            if d_val is not None:
+                summary_m = find_fixed_metrics_from_summaries(cand_dirs, d_val, dataset)
+                if summary_m:
+                    metrics = summary_m
+                    status = "completed"
 
         sid_metric = (
             sid_results_map.get((strat, phase))
@@ -1859,7 +1966,24 @@ def main():
             min_length=min_length,
         )
 
-        target_lengths = explicit_lengths if explicit_lengths else (detected_depths if detected_depths else [4])
+        if explicit_lengths:
+            target_lengths = explicit_lengths
+        else:
+            strat_depths = set()
+            scan_dirs = [report_dir]
+            parent_dir = os.path.dirname(report_dir) if report_dir else None
+            if parent_dir and os.path.isdir(parent_dir) and os.path.basename(parent_dir) == dataset:
+                scan_dirs.append(parent_dir)
+            for sdir in scan_dirs:
+                if not os.path.isdir(sdir):
+                    continue
+                for fname in os.listdir(sdir):
+                    m_tg = re.search(r"_max(\d+)\.(json|md)$", fname)
+                    if m_tg:
+                        strat_depths.add(int(m_tg.group(1)))
+                    elif fname.startswith("varlen") and "_max" not in fname:
+                        strat_depths.add(4)
+            target_lengths = sorted(list(strat_depths)) if strat_depths else (detected_depths if detected_depths else [4])
 
         for max_length in sorted(list(set(target_lengths))):
             # Compute tag for this specific max_length
