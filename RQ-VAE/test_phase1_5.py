@@ -979,7 +979,7 @@ class TestPhase15Reporting(unittest.TestCase):
             finally:
                 sys.argv = orig_argv
 
-    def test_phase1_and_phase1_5_separate_plots_when_both_present(self):
+    def test_phase1_and_phase1_5_single_unified_plot_when_both_present(self):
         from unittest.mock import MagicMock, patch
         spec = importlib.util.spec_from_file_location(
             "generate_comparison_report",
@@ -1052,33 +1052,26 @@ class TestPhase15Reporting(unittest.TestCase):
                 with patch.dict("sys.modules", {"matplotlib": mock_matplotlib, "matplotlib.pyplot": mock_plt}):
                     mod.main()
 
-                p1_png = res_dir / f"rate_distortion_frontier_{dataset}_phase1.png"
-                p15_png = res_dir / f"rate_distortion_frontier_{dataset}_phase1.5.png"
+                plot_png = res_dir / f"rate_distortion_frontier_{dataset}.png"
 
-                # Both separate phase plots exist
-                self.assertTrue(p1_png.exists())
-                self.assertTrue(p15_png.exists())
-
-                # No duplicate alias copy created
-                self.assertFalse((res_dir / f"strategy_comparison_{dataset}.png").exists())
-                self.assertFalse((res_dir / f"strategy_comparison_{dataset}_phase1.png").exists())
-                self.assertFalse((res_dir / f"rate_distortion_frontier_{dataset}.png").exists())
+                # Single unified plot exists
+                self.assertTrue(plot_png.exists())
+                self.assertFalse((res_dir / f"rate_distortion_frontier_{dataset}_phase1.png").exists())
+                self.assertFalse((res_dir / f"rate_distortion_frontier_{dataset}_phase1.5.png").exists())
 
                 # Check markdown report
                 md_file = res_dir / f"strategy_comparison.md"
                 with open(md_file) as f:
                     md_text = f.read()
 
-                self.assertIn(f"#### Phase 1 Rate-Distortion Pareto Frontier\n\n![Phase 1 Rate-Distortion Pareto Frontier]({p1_png.name})", md_text)
-                self.assertIn(f"#### Phase 1.5 Rate-Distortion Pareto Frontier\n\n![Phase 1.5 Rate-Distortion Pareto Frontier]({p15_png.name})", md_text)
+                self.assertIn(f"![Rate-Distortion Pareto Frontier]({plot_png.name})", md_text)
                 self.assertNotIn("### Performance & Rate-Distortion Overview", md_text)
 
                 # Check JSON output
                 json_file = res_dir / f"strategy_comparison.json"
                 with open(json_file) as f:
                     jdata = json.load(f)
-                self.assertIn(p1_png.name, jdata.get("plot_files", []))
-                self.assertIn(p15_png.name, jdata.get("plot_files", []))
+                self.assertIn(plot_png.name, jdata.get("plot_files", []))
 
             finally:
                 sys.argv = orig_argv

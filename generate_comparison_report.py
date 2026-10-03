@@ -894,38 +894,23 @@ def main():
         p15_by_strat = {r["strategy"]: r for r in recom_table_data if r["phase"] == "1.5"}
         common_h2h = [s for s in p1_by_strat if s in p15_by_strat]
 
-        # Plot generation: Rate-Distortion Pareto Frontiers (Phase 1 and/or Phase 1.5)
+        # Plot generation: Rate-Distortion Pareto Frontier (1 unified image for both phases)
         generated_plots = {}
         if not args.no_plot:
-            phases_to_plot = []
-            if target_phase == "1":
-                phases_to_plot.append("1")
-            elif target_phase == "1.5":
-                phases_to_plot.append("1.5")
-            elif target_phase in ("both", "all"):
-                has_p1 = any(str(v.get("phase")) == "1" and v.get("status") == "completed" for v in variable_bracketed)
-                has_p15 = any(str(v.get("phase")) == "1.5" and v.get("status") == "completed" for v in variable_bracketed)
-                if has_p1:
-                    phases_to_plot.append("1")
-                if has_p15:
-                    phases_to_plot.append("1.5")
-                if not phases_to_plot and (variable_bracketed or fixed_curve):
-                    phases_to_plot.append(None)
-
-            for p_val in phases_to_plot:
-                p_sfx = f"_phase{p_val}" if p_val else ""
-                p_fname = f"rate_distortion_frontier_{dataset}{p_sfx}{tag}.png"
-                p_path = os.path.join(report_dir, p_fname)
-                saved = generate_rate_distortion_plot(
-                    rd_data=rd_data,
-                    dataset=dataset,
-                    model_name=model_name,
-                    out_png_path=p_path,
-                    phase=p_val,
-                    max_length=max_length,
-                )
-                if saved:
-                    generated_plots[p_val] = p_fname
+            p_val = target_phase if target_phase in ("1", "1.5") else None
+            p_sfx = f"_phase{p_val}" if p_val else ""
+            p_fname = f"rate_distortion_frontier_{dataset}{p_sfx}{tag}.png"
+            p_path = os.path.join(report_dir, p_fname)
+            saved = generate_rate_distortion_plot(
+                rd_data=rd_data,
+                dataset=dataset,
+                model_name=model_name,
+                out_png_path=p_path,
+                phase=p_val,
+                max_length=max_length,
+            )
+            if saved:
+                generated_plots[p_val] = p_fname
 
         # -------------------------------------------------------------
         # 1. TEXT FORMATTING
