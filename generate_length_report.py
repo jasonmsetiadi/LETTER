@@ -22,7 +22,7 @@ def get_tokenizer_label(tokenizer_name):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Generate fixed-length codebook depth ablation report and comparison across tokenizers."
+        description="Generate fixed-length codebook depth ablation comparison across tokenizers."
     )
     parser.add_argument("--dataset", type=str, default="Instruments", help="Dataset name.")
     parser.add_argument(
@@ -49,7 +49,7 @@ def parse_args():
         "--output-dir",
         type=str,
         default=None,
-        help="Custom output directory to save report and plot. Defaults to results/<dataset>/ (multi-tokenizer) or results/<dataset>/<tokenizer>/ (single tokenizer).",
+        help="Custom output directory to save plot. Defaults to results/<dataset>/ (multi-tokenizer) or results/<dataset>/<tokenizer>/ (single tokenizer).",
     )
     parser.add_argument(
         "--no-plot",
@@ -296,11 +296,10 @@ def main():
         print(summary_text)
 
         # Plot generation
-        plot_saved = False
-        plot_fname = f"fixed_length_comparison_{dataset}.png"
-        plot_png_path = os.path.join(out_dir, plot_fname)
         if not args.no_plot:
-            plot_saved = generate_length_plot(
+            plot_fname = f"fixed_length_comparison_{dataset}.png"
+            plot_png_path = os.path.join(out_dir, plot_fname)
+            generate_length_plot(
                 table_data=table_data,
                 dataset=dataset,
                 model_name=model_name,
@@ -308,101 +307,7 @@ def main():
                 tested_lengths=tested_lengths,
                 out_png_path=plot_png_path,
             )
-
-        # Markdown report
-        tok_display_list = ", ".join(f"`{get_tokenizer_label(t)}`" for t in tokenizers)
-        md_lines = [
-            f"# Fixed-Length Codebook Depth Comparison: {model_name} ({dataset})\n",
-            f"- **Dataset**: `{dataset}`",
-            f"- **Model**: `{model_name}`",
-            f"- **Tokenizers Evaluated**: {tok_display_list}",
-            f"- **Evaluated Depths (L)**: {', '.join(str(x) for x in tested_lengths)}\n",
-        ]
-
-        if plot_saved:
-            md_lines.extend([
-                "### Performance Curves\n",
-                f"![Fixed-Length Comparison Plot]({plot_fname})\n",
-            ])
-
-        md_lines.extend([
-            "### 1. Recommendation Performance Across Codebook Depths\n",
-            "| Tokenizer | Length (L) | Hit@1 | Hit@5 | Hit@10 | NDCG@5 | NDCG@10 | Status |",
-            "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
-        ])
-
-        for row in table_data:
-            m = row["metrics"]
-            v1 = f"{m['hit@1'] * 100:.2f}%" if m.get("hit@1") is not None else "-"
-            v5 = f"{m['hit@5'] * 100:.2f}%" if m.get("hit@5") is not None else "-"
-            v10 = f"{m['hit@10'] * 100:.2f}%" if m.get("hit@10") is not None else "-"
-            vn5 = f"{m['ndcg@5'] * 100:.2f}%" if m.get("ndcg@5") is not None else "-"
-            vn10 = f"{m['ndcg@10'] * 100:.2f}%" if m.get("ndcg@10") is not None else "-"
-            md_lines.append(
-                f"| **{row['tokenizer_label']}** | {row['length']} | "
-                f"{v1} | {v5} | {v10} | {vn5} | {vn10} | {row['status']} |"
-            )
-        md_lines.append("")
-
-        # Side-by-side comparison tables if multiple tokenizers
-        if len(tokenizers) > 1:
-            tok_labels = [get_tokenizer_label(t) for t in tokenizers]
-
-            # Hit@10 table
-            h10_header = "| Length (L) | " + " | ".join(tok_labels) + " | Best |"
-            h10_sep = "| :---: | " + " | ".join([":---:" for _ in tok_labels]) + " | :---: |"
-            md_lines.extend([
-                "### 2. Hit@10 (%) Comparison Across Tokenizers\n",
-                h10_header,
-                h10_sep,
-            ])
-            for l in tested_lengths:
-                vals = []
-                best_label = "-"
-                best_v = -1.0
-                for tok in tokenizers:
-                    matched = [r for r in table_data if r["length"] == l and r["tokenizer"] == tok]
-                    val = matched[0]["metrics"].get("hit@10") if matched else None
-                    if val is not None:
-                        vals.append(f"{val * 100:.2f}%")
-                        if val > best_v:
-                            best_v = val
-                            best_label = get_tokenizer_label(tok)
-                    else:
-                        vals.append("-")
-                md_lines.append(f"| {l} | " + " | ".join(vals) + f" | **{best_label}** |")
-            md_lines.append("")
-
-            # NDCG@10 table
-            n10_header = "| Length (L) | " + " | ".join(tok_labels) + " | Best |"
-            n10_sep = "| :---: | " + " | ".join([":---:" for _ in tok_labels]) + " | :---: |"
-            md_lines.extend([
-                "### 3. NDCG@10 (%) Comparison Across Tokenizers\n",
-                n10_header,
-                n10_sep,
-            ])
-            for l in tested_lengths:
-                vals = []
-                best_label = "-"
-                best_v = -1.0
-                for tok in tokenizers:
-                    matched = [r for r in table_data if r["length"] == l and r["tokenizer"] == tok]
-                    val = matched[0]["metrics"].get("ndcg@10") if matched else None
-                    if val is not None:
-                        vals.append(f"{val * 100:.2f}%")
-                        if val > best_v:
-                            best_v = val
-                            best_label = get_tokenizer_label(tok)
-                    else:
-                        vals.append("-")
-                md_lines.append(f"| {l} | " + " | ".join(vals) + f" | **{best_label}** |")
-            md_lines.append("")
-
-        report_fname = f"fixed_length_comparison_{dataset}.md"
-        summary_md_path = os.path.join(out_dir, report_fname)
-        with open(summary_md_path, "w", encoding="utf-8") as mf:
-            mf.write("\n".join(md_lines) + "\n")
-        print(f"Markdown table saved to: {summary_md_path}\n")
+        print()
 
 
 if __name__ == "__main__":

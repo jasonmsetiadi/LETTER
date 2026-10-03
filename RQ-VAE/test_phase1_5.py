@@ -959,6 +959,8 @@ class TestPhase15Reporting(unittest.TestCase):
 
                 plot_png = res_dir / f"rate_distortion_frontier_{dataset}_phase1.5.png"
                 self.assertTrue(plot_png.exists())
+                length_plot_png = res_dir / f"length_comparison_{dataset}_phase1.5.png"
+                self.assertTrue(length_plot_png.exists())
                 # Verify duplicate strategy_comparison file was eliminated
                 duplicate_png = res_dir / f"strategy_comparison_{dataset}_phase1.5.png"
                 self.assertFalse(duplicate_png.exists())
@@ -967,8 +969,9 @@ class TestPhase15Reporting(unittest.TestCase):
                 with open(md_file) as f:
                     md_text = f.read()
 
-                # Verify markdown embeds the rate-distortion plot once in Section 3
+                # Verify markdown embeds both plots in Section 3
                 self.assertIn(f"![Phase 1.5 Rate-Distortion Pareto Frontier]({plot_png.name})", md_text)
+                self.assertIn(f"![Phase 1.5 Codebook Depth & Strategy Comparison]({length_plot_png.name})", md_text)
                 self.assertNotIn("### Performance & Rate-Distortion Overview", md_text)
 
             finally:
@@ -978,6 +981,7 @@ class TestPhase15Reporting(unittest.TestCase):
             orig_argv = sys.argv
             try:
                 if plot_png.exists(): plot_png.unlink()
+                if length_plot_png.exists(): length_plot_png.unlink()
 
                 sys.argv = [
                     "generate_comparison_report.py",
@@ -992,10 +996,12 @@ class TestPhase15Reporting(unittest.TestCase):
 
                 # Verify no plot was created
                 self.assertFalse(plot_png.exists())
+                self.assertFalse(length_plot_png.exists())
 
                 with open(md_file) as f:
                     md_text = f.read()
                 self.assertNotIn("![Phase 1.5 Rate-Distortion Pareto Frontier]", md_text)
+                self.assertNotIn("![Phase 1.5 Codebook Depth & Strategy Comparison]", md_text)
             finally:
                 sys.argv = orig_argv
 
@@ -1073,11 +1079,15 @@ class TestPhase15Reporting(unittest.TestCase):
                     mod.main()
 
                 plot_png = res_dir / f"rate_distortion_frontier_{dataset}.png"
+                length_plot_png = res_dir / f"length_comparison_{dataset}.png"
 
                 # Single unified plot exists
                 self.assertTrue(plot_png.exists())
                 self.assertFalse((res_dir / f"rate_distortion_frontier_{dataset}_phase1.png").exists())
                 self.assertFalse((res_dir / f"rate_distortion_frontier_{dataset}_phase1.5.png").exists())
+                self.assertTrue(length_plot_png.exists())
+                self.assertFalse((res_dir / f"length_comparison_{dataset}_phase1.png").exists())
+                self.assertFalse((res_dir / f"length_comparison_{dataset}_phase1.5.png").exists())
 
                 # Check markdown report
                 md_file = res_dir / f"strategy_comparison.md"
@@ -1085,6 +1095,7 @@ class TestPhase15Reporting(unittest.TestCase):
                     md_text = f.read()
 
                 self.assertIn(f"![Rate-Distortion Pareto Frontier]({plot_png.name})", md_text)
+                self.assertIn(f"![Codebook Depth & Strategy Comparison]({length_plot_png.name})", md_text)
                 self.assertNotIn("### Performance & Rate-Distortion Overview", md_text)
 
                 # Check JSON output
@@ -1092,6 +1103,7 @@ class TestPhase15Reporting(unittest.TestCase):
                 with open(json_file) as f:
                     jdata = json.load(f)
                 self.assertIn(plot_png.name, jdata.get("plot_files", []))
+                self.assertIn(length_plot_png.name, jdata.get("plot_files", []))
 
             finally:
                 sys.argv = orig_argv
