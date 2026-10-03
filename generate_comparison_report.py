@@ -503,9 +503,10 @@ def generate_rate_distortion_plot(
         "entropy": "#8e44ad",              # purple
         "pagerank": "#16a085",             # teal
         "pr": "#16a085",                   # teal
-        "co_occurrence": "#d35400",        # rust/dark orange
-        "cooccur": "#d35400",              # rust/dark orange
-        "co_occur": "#d35400",             # rust/dark orange
+        "co_occurrence": "#f1c40f",        # yellow
+        "cooccur": "#f1c40f",              # yellow
+        "co_occur": "#f1c40f",             # yellow
+        "cooccurrence": "#f1c40f",         # yellow
         "cf_density": "#c0392b",           # deep red
         "cf": "#c0392b",                   # deep red
         "popularity": "#2980b9",           # blue (fallback for vanilla popularity)
@@ -528,10 +529,10 @@ def generate_rate_distortion_plot(
                 "entropy": "#8e44ad",
                 "pagerank": "#16a085",     # teal
                 "pr": "#16a085",
-                "co_occurrence": "#d35400",# rust/dark orange
-                "cooccur": "#d35400",
-                "co_occur": "#d35400",
-                "cooccurrence": "#d35400",
+                "co_occurrence": "#f1c40f",# yellow
+                "cooccur": "#f1c40f",
+                "co_occur": "#f1c40f",
+                "cooccurrence": "#f1c40f",
                 "cf_density": "#c0392b",   # deep red
                 "cf": "#c0392b",
             }
@@ -549,6 +550,8 @@ def generate_rate_distortion_plot(
             "-pr",
             "co_occurrence",
             "cooccur",
+            "co_occur",
+            "cooccurrence",
             "cf_density",
             "-cf",
             "popularity",
