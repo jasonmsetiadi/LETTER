@@ -403,7 +403,7 @@ class TestPhase15Reporting(unittest.TestCase):
         spec.loader.exec_module(mod)
 
         # Phase 1 detection
-        self.assertEqual(mod.file_to_strategy("fixed.json"), ("fixed", "fixed"))
+        self.assertEqual(mod.file_to_strategy("fixed_L4.json"), ("fixed", "fixed"))
         self.assertEqual(mod.file_to_strategy("varlen.json"), ("shortest_unique", "1"))
         self.assertEqual(mod.file_to_strategy("varlen-res.json"), ("residual", "1"))
         self.assertEqual(mod.file_to_strategy("varlen-pop.json"), ("popularity:frequency", "1"))
@@ -420,6 +420,9 @@ class TestPhase15Reporting(unittest.TestCase):
         # With tag
         self.assertEqual(mod.file_to_strategy("varlen-res_max10.json", tag="_max10"), ("residual", "1"))
         self.assertEqual(mod.file_to_strategy("varlen-res_phase1.5_max10.json", tag="_max10"), ("residual", "1.5"))
+        self.assertEqual(mod.file_to_strategy("varlen-res_max4.json", tag="_max4"), ("residual", "1"))
+        self.assertEqual(mod.file_to_strategy("varlen-res_phase1.5_max4.json", tag="_max4"), ("residual", "1.5"))
+        self.assertIsNone(mod.file_to_strategy("varlen-res_phase1.5.json", tag="_max4"))
 
     def test_strategy_to_filename(self):
         import importlib.util
@@ -430,12 +433,15 @@ class TestPhase15Reporting(unittest.TestCase):
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
-        self.assertEqual(mod.strategy_to_filename("fixed", "fixed"), "fixed.json")
+        self.assertEqual(mod.strategy_to_filename("fixed", "fixed"), "fixed_L4.json")
+        self.assertEqual(mod.strategy_to_filename("fixed", "fixed", tag="_max4"), "fixed_L4.json")
+        self.assertEqual(mod.strategy_to_filename("fixed", "fixed", tag="_max10"), "fixed_L10.json")
         self.assertEqual(mod.strategy_to_filename("residual", "1"), "varlen-res.json")
         self.assertEqual(mod.strategy_to_filename("residual", "1.5"), "varlen-res_phase1.5.json")
         self.assertEqual(mod.strategy_to_filename("popularity:frequency", "1.5"), "varlen-pop_phase1.5.json")
         self.assertEqual(mod.strategy_to_filename("popularity:user_entropy", "1.5"), "varlen-pop-entropy_phase1.5.json")
         self.assertEqual(mod.strategy_to_filename("residual", "1.5", tag="_max10"), "varlen-res_phase1.5_max10.json")
+        self.assertEqual(mod.strategy_to_filename("residual", "1.5", tag="_max4"), "varlen-res_phase1.5_max4.json")
 
     def test_item_sort_key(self):
         import importlib.util
@@ -487,7 +493,7 @@ class TestPhase15Reporting(unittest.TestCase):
 
             # Create Phase 1.5 residual index file
             p15_idx = {"0": [1, 2], "1": [5, 6, 7], "2": [9, 10, 11, 12]}
-            p15_file = tok_dir / f"{dataset}.index.varlen.res-phase1.5.json"
+            p15_file = tok_dir / f"{dataset}.index.varlen.res-phase1.5.max4.json"
             with open(p15_file, "w") as f:
                 json.dump(p15_idx, f)
 
@@ -534,7 +540,7 @@ class TestPhase15Reporting(unittest.TestCase):
 
             # Fixed baseline result
             fixed_res = {"mean_results": {"hit@1": 0.05, "hit@5": 0.08, "hit@10": 0.10, "ndcg@5": 0.07, "ndcg@10": 0.08}}
-            with open(res_dir / "fixed.json", "w") as f:
+            with open(res_dir / "fixed_L4.json", "w") as f:
                 json.dump(fixed_res, f)
 
             # Phase 1 residual result
@@ -593,7 +599,7 @@ class TestPhase15Reporting(unittest.TestCase):
         spec.loader.exec_module(mod)
 
         # Standard filenames without tag
-        self.assertEqual(mod.file_to_strategy("fixed.json"), ("fixed", "fixed"))
+        self.assertEqual(mod.file_to_strategy("fixed_L4.json"), ("fixed", "fixed"))
         self.assertEqual(mod.file_to_strategy("fixed_L2.json"), ("fixed_L2", "fixed"))
         self.assertEqual(mod.file_to_strategy("fixed_L3.json"), ("fixed_L3", "fixed"))
         self.assertEqual(mod.file_to_strategy("fixed_L6.json"), ("fixed_L6", "fixed"))
@@ -601,9 +607,11 @@ class TestPhase15Reporting(unittest.TestCase):
         self.assertEqual(mod.file_to_strategy("varlen-res_phase1.5.json"), ("residual", "1.5"))
 
         # With tag
-        self.assertEqual(mod.file_to_strategy("fixed_max10.json", tag="_max10"), ("fixed", "fixed"))
         self.assertEqual(mod.file_to_strategy("fixed_L10.json", tag="_max10"), ("fixed", "fixed"))
         self.assertEqual(mod.file_to_strategy("fixed_L2.json", tag="_max10"), ("fixed_L2", "fixed"))
+        self.assertEqual(mod.file_to_strategy("fixed_L4.json", tag="_max4"), ("fixed", "fixed"))
+        self.assertIsNone(mod.file_to_strategy("fixed.json", tag="_max4"))
+        self.assertEqual(mod.file_to_strategy("fixed_L2.json", tag="_max4"), ("fixed_L2", "fixed"))
 
     def test_strategy_sort_order_multi_depth_fixed(self):
         spec = importlib.util.spec_from_file_location(
@@ -723,13 +731,13 @@ class TestPhase15Reporting(unittest.TestCase):
                 json.dump({"mean_results": {"hit@1": 0.03, "hit@5": 0.06, "hit@10": 0.08, "ndcg@5": 0.05, "ndcg@10": 0.06}}, f)
 
             # Fixed L=4 baseline result
-            with open(res_dir / "fixed.json", "w") as f:
+            with open(res_dir / "fixed_L4.json", "w") as f:
                 json.dump({"mean_results": {"hit@1": 0.05, "hit@5": 0.08, "hit@10": 0.10, "ndcg@5": 0.07, "ndcg@10": 0.08}}, f)
 
             # Residual Phase 1.5 index with lengths 3
             tok_data_dir = data_dir / "rqvae"
             tok_data_dir.mkdir(parents=True, exist_ok=True)
-            with open(tok_data_dir / f"{dataset}.index.varlen.res-phase1.5.json", "w") as f:
+            with open(tok_data_dir / f"{dataset}.index.varlen.res-phase1.5.max4.json", "w") as f:
                 json.dump({"0": [1, 2, 3], "1": [2, 3, 4]}, f)
 
             # Residual Phase 1.5 result (NDCG@10 = 0.078 beats interpolated 0.070 at L=3.0)
@@ -909,7 +917,7 @@ class TestPhase15Reporting(unittest.TestCase):
 
             with open(res_dir / "fixed_L2.json", "w") as f:
                 json.dump({"mean_results": {"hit@1": 0.03, "hit@5": 0.06, "hit@10": 0.08, "ndcg@5": 0.05, "ndcg@10": 0.06}}, f)
-            with open(res_dir / "fixed.json", "w") as f:
+            with open(res_dir / "fixed_L4.json", "w") as f:
                 json.dump({"mean_results": {"hit@1": 0.05, "hit@5": 0.08, "hit@10": 0.10, "ndcg@5": 0.07, "ndcg@10": 0.08}}, f)
 
             tok_dir = data_dir / "rqvae"
@@ -1016,7 +1024,7 @@ class TestPhase15Reporting(unittest.TestCase):
             # Fixed baseline
             with open(res_dir / "fixed_L2.json", "w") as f:
                 json.dump({"mean_results": {"hit@1": 0.03, "hit@5": 0.06, "hit@10": 0.08, "ndcg@5": 0.05, "ndcg@10": 0.06}}, f)
-            with open(res_dir / "fixed.json", "w") as f:
+            with open(res_dir / "fixed_L4.json", "w") as f:
                 json.dump({"mean_results": {"hit@1": 0.05, "hit@5": 0.08, "hit@10": 0.10, "ndcg@5": 0.07, "ndcg@10": 0.08}}, f)
 
             tok_dir = data_dir / "rqvae"
@@ -1135,6 +1143,12 @@ class TestPhase15Reporting(unittest.TestCase):
             )
             self.assertEqual(max_l, 8)
             self.assertEqual(tag, "_max8")
+
+            max_l, tag, depths = mod.autodetect_max_length_and_fixed_depths(
+                str(report_dir), str(tmp_path / "data"), "TestDS", "rqvae", explicit_max_length=4
+            )
+            self.assertEqual(max_l, 4)
+            self.assertEqual(tag, "_max4")
 
             # Case 5: Catalog index file detection (length 5)
             with open(data_dir / "TestDS.index.json", "w") as f:

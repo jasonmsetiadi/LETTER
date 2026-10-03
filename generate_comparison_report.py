@@ -86,11 +86,14 @@ def file_to_strategy(filename, tag=""):
             return None
         stem = stem[:-len(tag)]
     else:
+        if stem == "fixed_L4":
+            return ("fixed", "fixed")
         if stem.startswith("fixed_L") and stem[7:].isdigit():
             return (stem, "fixed")
         if "_max" in stem or "_min" in stem:
             return None
-    if stem == "fixed":
+
+    if stem == "fixed_L4":
         return ("fixed", "fixed")
     if stem.startswith("fixed_L") and stem[7:].isdigit():
         return (stem, "fixed")
@@ -130,7 +133,12 @@ def file_to_strategy(filename, tag=""):
 def strategy_to_filename(strat, phase, tag=""):
     """Construct expected result JSON filename for a (strategy, phase) pair."""
     if strat == "fixed":
-        return "fixed.json" if not tag else (f"fixed_L{tag.lstrip('_max')}.json" if tag.startswith("_max") else f"fixed{tag}.json")
+        if tag and tag.startswith("_max"):
+            return f"fixed_L{tag.lstrip('_max')}.json"
+        elif tag:
+            return f"fixed{tag}.json"
+        else:
+            return "fixed_L4.json"
     if strat.startswith("fixed_L") and strat[7:].isdigit():
         return f"{strat}.json"
     phase_str = "_phase1.5" if phase == "1.5" else ""
@@ -226,10 +234,6 @@ def autodetect_max_length_and_fixed_depths(
                 discovered_depths.add(d)
                 found_max_tags.add(d)
 
-            # unadorned fixed.json
-            if fname == "fixed.json":
-                discovered_depths.add(4)
-
     # 2. Scan dataset index files in data_root/dataset and data_root/dataset/tokenizer
     if data_root and dataset:
         index_dirs = [
@@ -272,14 +276,11 @@ def autodetect_max_length_and_fixed_depths(
     if min_length != 1:
         tag = f"_min{min_length}-max{max_length}"
     elif explicit_max_length is not None:
-        tag = "" if explicit_max_length == 4 else f"_max{explicit_max_length}"
+        tag = f"_max{explicit_max_length}"
     elif max_length in found_max_tags:
         tag = f"_max{max_length}"
-    elif max_length != 4:
-        if report_dir and os.path.isdir(report_dir) and any(f.endswith(f"_max{max_length}.json") for f in os.listdir(report_dir)):
-            tag = f"_max{max_length}"
-        else:
-            tag = ""
+    elif report_dir and os.path.isdir(report_dir) and any(f.endswith(f"_max{max_length}.json") for f in os.listdir(report_dir)):
+        tag = f"_max{max_length}"
     else:
         tag = ""
 
@@ -726,7 +727,7 @@ def main():
                 return False
             tok_d = os.path.join(data_root, dataset, tokenizer)
             ds_d = os.path.join(data_root, dataset)
-            var_t = "" if (max_length == 4 and min_length == 1) else (f".max{max_length}" if min_length == 1 else f".min{min_length}-max{max_length}")
+            var_t = f".max{max_length}" if min_length == 1 else f".min{min_length}-max{max_length}"
             strat_sfx = ""
             if strat == "residual":
                 strat_sfx = ".res"
@@ -742,9 +743,7 @@ def main():
                 strat_sfx = sig_map.get(sig, f".pop-{sig}")
             cands = [
                 os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}-phase1.5{var_t}.json"),
-                os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}-phase1.5.json"),
                 os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}-phase1.5{var_t}.json"),
-                os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}-phase1.5.json"),
             ]
             return any(os.path.isfile(c) for c in cands)
 
@@ -827,14 +826,6 @@ def main():
         for strat, phase in combined_items:
             res_fname = strategy_to_filename(strat, phase, tag)
             res_file = os.path.join(report_dir, res_fname) if res_fname else None
-            if strat == "fixed" and (not res_file or not os.path.isfile(res_file)):
-                alt = os.path.join(report_dir, f"fixed_L{max_length}.json")
-                if os.path.isfile(alt):
-                    res_file = alt
-            elif strat.startswith("fixed_L") and strat[7:].isdigit() and int(strat[7:]) == max_length and (not res_file or not os.path.isfile(res_file)):
-                alt = os.path.join(report_dir, "fixed.json")
-                if os.path.isfile(alt):
-                    res_file = alt
 
             metrics = {}
             status = "pending"

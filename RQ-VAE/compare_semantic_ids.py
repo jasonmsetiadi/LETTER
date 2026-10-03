@@ -202,27 +202,15 @@ def evaluate_semantic_ids(
 
     if index_file is None:
         cand_list = []
-        if max_length and max_length != 4:
+        if max_length:
             cand_list.extend([
-                tok_dir / f"{dataset}.index.fixed-for-varlen.L{max_length}.json",
                 tok_dir / f"{dataset}.index.fixed.L{max_length}.json",
-                tok_dir / f"{dataset}.index.fixed.json",
-                tok_dir / f"{dataset}.index.fixed-for-varlen.json",
-                dataset_dir / f"{dataset}.index.fixed-for-varlen.L{max_length}.json",
+                tok_dir / f"{dataset}.index.fixed-for-varlen.L{max_length}.json",
                 dataset_dir / f"{dataset}.index.fixed.L{max_length}.json",
-                dataset_dir / f"{dataset}.index.fixed.json",
-                dataset_dir / f"{dataset}.index.fixed-for-varlen.json",
-                dataset_dir / f"{dataset}.index.json",
+                dataset_dir / f"{dataset}.index.fixed-for-varlen.L{max_length}.json",
             ])
-        else:
-            cand_list.extend([
-                tok_dir / f"{dataset}.index.fixed.json",
-                tok_dir / f"{dataset}.index.fixed-for-varlen.json",
-                dataset_dir / f"{dataset}.index.fixed.json",
-                dataset_dir / f"{dataset}.index.fixed-for-varlen.json",
-                dataset_dir / f"{dataset}.index.json",
-            ])
-        index_file = next((c for c in cand_list if c.exists()), cand_list[0])
+        cand_list.append(dataset_dir / f"{dataset}.index.json")
+        index_file = next((c for c in cand_list if c.exists()), cand_list[0] if cand_list else tok_dir / f"{dataset}.index.fixed.L4.json")
     index_file = Path(index_file)
     if not index_file.exists():
         raise FileNotFoundError(f"Index file not found: {index_file}")
@@ -264,11 +252,6 @@ def evaluate_semantic_ids(
             dataset_dir / f"{dataset}.index.fixed.L{d}.json",
             dataset_dir / f"{dataset}.index.fixed-for-varlen.L{d}.json",
         ]
-        if d == 4:
-            d_candidates.extend([
-                tok_dir / f"{dataset}.index.fixed.json",
-                dataset_dir / f"{dataset}.index.fixed.json",
-            ])
         for dc in d_candidates:
             if dc.exists():
                 try:
@@ -452,9 +435,7 @@ def evaluate_semantic_ids(
 
         # Determine file suffix
         var_tag = (
-            ""
-            if (max_length == 4 and min_length == 1)
-            else (f".max{max_length}" if min_length == 1 else f".min{min_length}-max{max_length}")
+            f".max{max_length}" if min_length == 1 else f".min{min_length}-max{max_length}"
         )
 
         strat_suffix = ""
@@ -493,9 +474,7 @@ def evaluate_semantic_ids(
 
         cand_files = [
             tok_dir / f"{dataset}.index.varlen{strat_suffix}-phase1.5{var_tag}.json",
-            tok_dir / f"{dataset}.index.varlen{strat_suffix}-phase1.5.json",
             dataset_dir / f"{dataset}.index.varlen{strat_suffix}-phase1.5{var_tag}.json",
-            dataset_dir / f"{dataset}.index.varlen{strat_suffix}-phase1.5.json",
         ]
         found_file = next((c for c in cand_files if c.exists()), None)
 
@@ -804,7 +783,7 @@ def main():
     else:
         out_dir = repo_root / "LETTER-TIGER" / "results" / args.dataset
 
-    rep_tag = "" if (args.max_length == 4 and args.min_length == 1) else (f"_max{args.max_length}" if args.min_length == 1 else f"_min{args.min_length}-max{args.max_length}")
+    rep_tag = f"_max{args.max_length}" if args.min_length == 1 else f"_min{args.min_length}-max{args.max_length}"
     default_md = out_dir / f"semantic_id_comparison{rep_tag}.md"
     default_json = out_dir / f"semantic_id_comparison{rep_tag}.json"
 

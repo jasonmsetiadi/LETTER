@@ -90,8 +90,6 @@ def autodetect_lengths(tokenizers, search_base_dir):
         for fname in os.listdir(tok_dir):
             if not fname.endswith(".json"):
                 continue
-            if fname in ("fixed.json", "fixed_L4.json"):
-                found_lengths.add(4)
             m = re.match(r"^fixed_L(\d+)\.json$", fname)
             if m:
                 found_lengths.add(int(m.group(1)))
@@ -102,12 +100,8 @@ def find_fixed_result_file(tok_dir, length):
     """Locate fixed-length result json for a given codebook depth."""
     if not os.path.isdir(tok_dir):
         return None
-    cands = ["fixed.json", "fixed_L4.json"] if length == 4 else [f"fixed_L{length}.json"]
-    for c in cands:
-        p = os.path.join(tok_dir, c)
-        if os.path.isfile(p):
-            return p
-    return None
+    p = os.path.join(tok_dir, f"fixed_L{length}.json")
+    return p if os.path.isfile(p) else None
 
 
 def generate_length_plot(table_data, dataset, model_name, tokenizers, tested_lengths, out_png_path):

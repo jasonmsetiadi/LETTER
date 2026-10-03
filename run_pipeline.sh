@@ -313,8 +313,8 @@ if [[ "$MODE" == "varlen" ]]; then
       STRAT_SUFFIX=""
       STRAT_TAG=""
       if [[ "$PHASE" == "1.5" && -z "$TARGET_LENGTHS" && -z "$FIXED_INDEX_PARAM" ]]; then
-        cand1="$DATA_ROOT/$DATASET/$TOKENIZER/$DATASET.index.fixed.json"
-        cand2="$DATA_ROOT/$DATASET/$DATASET.index.fixed.json"
+        cand1="$DATA_ROOT/$DATASET/$TOKENIZER/$DATASET.index.fixed.L${NUM_LAYERS}.json"
+        cand2="$DATA_ROOT/$DATASET/$DATASET.index.fixed.L${NUM_LAYERS}.json"
         if [[ -f "$cand1" ]]; then
           FIXED_INDEX_PARAM="$cand1"
           printf '[Phase 1.5] Autodetected reference fixed index for shortest_unique: %s\n' "$FIXED_INDEX_PARAM"
@@ -369,15 +369,7 @@ if [[ "$MODE" == "varlen" ]]; then
       STRAT_TAG="-res"
       if [[ "$PHASE" != "1.5" ]]; then
         if [[ -z "$RESIDUALS_FILE" ]]; then
-          if [[ "$NUM_LAYERS" -ne 4 && -f "$DATA_ROOT/$DATASET/$DATASET.residuals.L${NUM_LAYERS}.json" ]]; then
-            RESIDUALS_FILE="$DATA_ROOT/$DATASET/$DATASET.residuals.L${NUM_LAYERS}.json"
-          elif [[ "$MAX_LENGTH" -ne 4 && -f "$DATA_ROOT/$DATASET/$DATASET.residuals.L${MAX_LENGTH}.json" ]]; then
-            RESIDUALS_FILE="$DATA_ROOT/$DATASET/$DATASET.residuals.L${MAX_LENGTH}.json"
-          elif [[ "$MAX_LENGTH" -ne 4 ]]; then
-            RESIDUALS_FILE="$DATA_ROOT/$DATASET/$DATASET.residuals.L${MAX_LENGTH}.json"
-          else
-            RESIDUALS_FILE="$DATA_ROOT/$DATASET/$DATASET.residuals.json"
-          fi
+          RESIDUALS_FILE="$DATA_ROOT/$DATASET/$DATASET.residuals.L${MAX_LENGTH}.json"
         fi
         if [[ ! -f "$RESIDUALS_FILE" ]]; then
           printf 'Residuals file not found for residual strategy: %s\n' "$RESIDUALS_FILE" >&2
@@ -691,11 +683,7 @@ TARGET_INDEX_ARG=""
 
 if [[ "$MODE" == "fixed" ]]; then
   # --- Fixed-Length Mode ---
-  if [[ "$NUM_LAYERS" -eq 4 ]]; then
-    DEF_NAME="$DATASET.index.fixed.json"
-  else
-    DEF_NAME="$DATASET.index.fixed.L${NUM_LAYERS}.json"
-  fi
+  DEF_NAME="$DATASET.index.fixed.L${NUM_LAYERS}.json"
 
   if [[ -n "$INDEX_NAME" ]]; then
     if [[ "$INDEX_NAME" == /* ]]; then
@@ -717,25 +705,15 @@ if [[ "$MODE" == "fixed" ]]; then
     generate_fixed_index_file "$TARGET_INDEX_FILE"
   fi
 
-  if [[ "$NUM_LAYERS" -eq 4 ]]; then
-    CUR_TIGER_CKPT="./ckpt/$DATASET/$TOK_NAME/fixed"
-    CUR_LCREC_CKPT="./ckpt/$DATASET/$TOK_NAME/fixed"
-    CUR_TIGER_DEFAULT_RES="./results/$DATASET/$TOK_NAME/fixed.json"
-    CUR_LCREC_DEFAULT_RES="./results/$DATASET/$TOK_NAME/fixed.json"
-    CUR_LCREC_WANDB="${DATASET}-${TOK_NAME}-fixed"
-  else
-    CUR_TIGER_CKPT="./ckpt/$DATASET/$TOK_NAME/fixed-L${NUM_LAYERS}"
-    CUR_LCREC_CKPT="./ckpt/$DATASET/$TOK_NAME/fixed-L${NUM_LAYERS}"
-    CUR_TIGER_DEFAULT_RES="./results/$DATASET/$TOK_NAME/fixed_L${NUM_LAYERS}.json"
-    CUR_LCREC_DEFAULT_RES="./results/$DATASET/$TOK_NAME/fixed_L${NUM_LAYERS}.json"
-    CUR_LCREC_WANDB="${DATASET}-${TOK_NAME}-fixed-L${NUM_LAYERS}"
-  fi
+  CUR_TIGER_CKPT="./ckpt/$DATASET/$TOK_NAME/fixed-L${NUM_LAYERS}"
+  CUR_LCREC_CKPT="./ckpt/$DATASET/$TOK_NAME/fixed-L${NUM_LAYERS}"
+  CUR_TIGER_DEFAULT_RES="./results/$DATASET/$TOK_NAME/fixed_L${NUM_LAYERS}.json"
+  CUR_LCREC_DEFAULT_RES="./results/$DATASET/$TOK_NAME/fixed_L${NUM_LAYERS}.json"
+  CUR_LCREC_WANDB="${DATASET}-${TOK_NAME}-fixed-L${NUM_LAYERS}"
 
 else
   # --- Variable-Length Mode ---
-  if [[ "$MAX_LENGTH" -eq 4 && "$MIN_LENGTH" -eq 1 ]]; then
-    VAR_TAG=""
-  elif [[ "$MIN_LENGTH" -eq 1 ]]; then
+  if [[ "$MIN_LENGTH" -eq 1 ]]; then
     VAR_TAG=".max${MAX_LENGTH}"
   else
     VAR_TAG=".min${MIN_LENGTH}-max${MAX_LENGTH}"
@@ -789,13 +767,8 @@ else
       fi
     else
       # Autodetect intermediate index in tokenizer directory
-      if [[ "$NUM_LAYERS" -eq 4 ]]; then
-        cand1="$TOK_INDEX_DIR/$DATASET.index.fixed.json"
-        cand2="$TOK_INDEX_DIR/$DATASET.index.fixed-for-varlen.json"
-      else
-        cand1="$TOK_INDEX_DIR/$DATASET.index.fixed.L${NUM_LAYERS}.json"
-        cand2="$TOK_INDEX_DIR/$DATASET.index.fixed-for-varlen.L${NUM_LAYERS}.json"
-      fi
+      cand1="$TOK_INDEX_DIR/$DATASET.index.fixed.L${NUM_LAYERS}.json"
+      cand2="$TOK_INDEX_DIR/$DATASET.index.fixed-for-varlen.L${NUM_LAYERS}.json"
 
       if [[ -f "$cand1" ]]; then
         INTERMEDIATE_FIXED_FILE="$cand1"
@@ -831,11 +804,7 @@ except Exception:
           printf '\n[Fixed index] Warning: %s has %s tokens, fewer than --max-length (%s).\n' \
             "$INTERMEDIATE_FIXED_FILE" "$CHECK_TOKENS" "$MAX_LENGTH"
           printf '[Fixed index] Will generate an intermediate fixed index with %s layers.\n' "$NUM_LAYERS"
-          if [[ "$NUM_LAYERS" -eq 4 ]]; then
-            INTERMEDIATE_FIXED_FILE="$TOK_INDEX_DIR/$DATASET.index.fixed-for-varlen.json"
-          else
-            INTERMEDIATE_FIXED_FILE="$TOK_INDEX_DIR/$DATASET.index.fixed-for-varlen.L${NUM_LAYERS}.json"
-          fi
+          INTERMEDIATE_FIXED_FILE="$TOK_INDEX_DIR/$DATASET.index.fixed-for-varlen.L${NUM_LAYERS}.json"
           REGEN_INTERMEDIATE=true
         fi
       fi
@@ -897,10 +866,7 @@ except Exception:
     PHASE_RES_TAG="_phase1.5"
   fi
 
-  if [[ "$MAX_LENGTH" -eq 4 && "$MIN_LENGTH" -eq 1 ]]; then
-    CKPT_TAG="varlen${STRAT_TAG}${PHASE_CKPT_TAG}"
-    RES_TAG="varlen${STRAT_TAG}${PHASE_RES_TAG}"
-  elif [[ "$MIN_LENGTH" -eq 1 ]]; then
+  if [[ "$MIN_LENGTH" -eq 1 ]]; then
     CKPT_TAG="varlen${STRAT_TAG}${PHASE_CKPT_TAG}-max${MAX_LENGTH}"
     RES_TAG="varlen${STRAT_TAG}${PHASE_RES_TAG}_max${MAX_LENGTH}"
   else
