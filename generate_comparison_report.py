@@ -317,14 +317,6 @@ def autodetect_max_length_and_fixed_depths(
                 discovered_depths.add(d)
                 found_max_tags.add(d)
 
-            # Untagged runs (fixed.json, fixed_L4.json, varlen.json) imply length 4
-            if fname in ("fixed.json", "fixed_L4.json") or (fname.startswith("varlen") and "_max" not in fname):
-                discovered_depths.add(4)
-
-            # Existing strategy_comparison report files
-            if fname in ("strategy_comparison.json", "strategy_comparison.md"):
-                discovered_depths.add(4)
-
             # Check experiment_summary files for evaluated depths
             if fname.startswith("experiment_summary") and (fname.endswith(".md") or fname.endswith(".txt")):
                 try:
@@ -383,21 +375,11 @@ def autodetect_max_length_and_fixed_depths(
     else:
         max_length = 4
 
-    # 4. Determine tag
-    tag = ""
+    # 4. Determine tag: always tagged with max_length (or min_length-max_length)
     if min_length != 1:
         tag = f"_min{min_length}-max{max_length}"
-    elif explicit_max_length is not None:
-        tag = f"_max{explicit_max_length}"
-    elif max_length in found_max_tags:
-        tag = f"_max{max_length}"
-    elif report_dir and os.path.isdir(report_dir) and any(
-        f.endswith(f"_max{max_length}.json") or f.endswith(f"_max{max_length}.md")
-        for f in os.listdir(report_dir)
-    ):
-        tag = f"_max{max_length}"
     else:
-        tag = ""
+        tag = f"_max{max_length}"
 
     return max_length, tag, sorted(list(discovered_depths))
 
@@ -1027,7 +1009,7 @@ def generate_report_for_max_length(
             res = file_to_strategy(fname, tag)
             if res and res not in discovered_items:
                 discovered_items.append(res)
-        if max_length == 4 and not discovered_items:
+        if max_length == 4:
             alt_tag = "" if tag == "_max4" else "_max4"
             for fname in sorted(os.listdir(report_dir)):
                 res = file_to_strategy(fname, alt_tag)
@@ -1303,15 +1285,6 @@ def generate_report_for_max_length(
         if rd_saved:
             generated_plots[p_val] = rd_fname
             all_plot_files.append(rd_fname)
-            if max_length == 4 and tag == "_max4":
-                untagged_fname = f"rate_distortion_frontier_{dataset}{p_sfx}.png"
-                untagged_path = os.path.join(report_dir, untagged_fname)
-                if untagged_path != rd_path:
-                    try:
-                        import shutil
-                        shutil.copyfile(rd_path, untagged_path)
-                    except Exception:
-                        pass
 
         # 2. Fixed-Length Codebook Depth & Strategy Comparison plot
         lc_fname = f"length_comparison_{dataset}{p_sfx}{tag}.png"
@@ -1327,15 +1300,6 @@ def generate_report_for_max_length(
         if lc_saved:
             generated_lc_plots[p_val] = lc_fname
             all_plot_files.append(lc_fname)
-            if max_length == 4 and tag == "_max4":
-                untagged_lc_fname = f"length_comparison_{dataset}{p_sfx}.png"
-                untagged_lc_path = os.path.join(report_dir, untagged_lc_fname)
-                if untagged_lc_path != lc_path:
-                    try:
-                        import shutil
-                        shutil.copyfile(lc_path, untagged_lc_path)
-                    except Exception:
-                        pass
 
     # -------------------------------------------------------------
     # 1. TEXT FORMATTING
@@ -1883,42 +1847,6 @@ def generate_report_for_max_length(
     print(f"Saved JSON report to: {report_json}\n")
 
 
-
-    # If max_length is 4, ensure both strategy_comparison and strategy_comparison_max4 files are available
-    if max_length == 4:
-        p_prefix = "strategy_comparison_phase1.5" if target_phase == "1.5" else "strategy_comparison"
-        if tag == "":
-            alt_md = os.path.join(report_dir, f"{p_prefix}_max4.md")
-            alt_json = os.path.join(report_dir, f"{p_prefix}_max4.json")
-        else:
-            alt_md = os.path.join(report_dir, f"{p_prefix}.md")
-            alt_json = os.path.join(report_dir, f"{p_prefix}.json")
-        try:
-            with open(alt_md, "w", encoding="utf-8") as f:
-                f.write("\n".join(md_lines) + "\n")
-            with open(alt_json, "w", encoding="utf-8") as f:
-                json.dump(json_output, f, indent=2)
-        except Exception:
-            pass
-
-        plots_to_sync = list(generated_plots.values()) + list(generated_lc_plots.values())
-        if plots_to_sync:
-            import shutil
-            for p_f in plots_to_sync:
-                src_p = os.path.join(report_dir, p_f)
-                if os.path.isfile(src_p):
-                    if "_max4" in p_f:
-                        dst_f = p_f.replace("_max4", "")
-                    else:
-                        dst_f = p_f[:-4] + "_max4.png"
-                    dst_p = os.path.join(report_dir, dst_f)
-                    if not os.path.isfile(dst_p) or src_p != dst_p:
-                        try:
-                            shutil.copyfile(src_p, dst_p)
-                        except Exception:
-                            pass
-
-
 def main():
     args = parse_args()
     dataset = args.dataset
@@ -1970,36 +1898,26 @@ def main():
             target_lengths = explicit_lengths
         else:
             strat_depths = set()
-            scan_dirs = [report_dir]
-            parent_dir = os.path.dirname(report_dir) if report_dir else None
-            if parent_dir and os.path.isdir(parent_dir) and os.path.basename(parent_dir) == dataset:
-                scan_dirs.append(parent_dir)
-            for sdir in scan_dirs:
-                if not os.path.isdir(sdir):
-                    continue
-                for fname in os.listdir(sdir):
+            if report_dir and os.path.isdir(report_dir):
+                for fname in os.listdir(report_dir):
                     m_tg = re.search(r"_max(\d+)\.(json|md)$", fname)
                     if m_tg:
                         strat_depths.add(int(m_tg.group(1)))
-                    elif fname.startswith("varlen") and "_max" not in fname:
-                        strat_depths.add(4)
+            if not strat_depths:
+                parent_dir = os.path.dirname(report_dir) if report_dir else None
+                if parent_dir and os.path.isdir(parent_dir) and os.path.basename(parent_dir) == dataset:
+                    for fname in os.listdir(parent_dir):
+                        m_tg = re.search(r"_max(\d+)\.(json|md)$", fname)
+                        if m_tg:
+                            strat_depths.add(int(m_tg.group(1)))
             target_lengths = sorted(list(strat_depths)) if strat_depths else (detected_depths if detected_depths else [4])
 
         for max_length in sorted(list(set(target_lengths))):
-            # Compute tag for this specific max_length
+            # Compute tag for this specific max_length: always tag with max length
             if min_length != 1:
                 tag = f"_min{min_length}-max{max_length}"
-            elif explicit_lengths and len(explicit_lengths) == 1 and max_length == explicit_lengths[0]:
-                tag = f"_max{max_length}"
-            elif report_dir and os.path.isdir(report_dir) and any(
-                f.endswith(f"_max{max_length}.json") or f.endswith(f"_max{max_length}.md")
-                for f in os.listdir(report_dir)
-            ):
-                tag = f"_max{max_length}"
-            elif max_length != 4:
-                tag = f"_max{max_length}"
             else:
-                tag = ""
+                tag = f"_max{max_length}"
 
             generate_report_for_max_length(
                 max_length=max_length,

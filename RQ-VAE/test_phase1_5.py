@@ -567,8 +567,8 @@ class TestPhase15Reporting(unittest.TestCase):
                 mod.main()
 
                 # Verify files were generated
-                md_file = res_dir / "strategy_comparison.md"
-                json_file = res_dir / "strategy_comparison.json"
+                md_file = res_dir / "strategy_comparison_max4.md"
+                json_file = res_dir / "strategy_comparison_max4.json"
                 self.assertTrue(md_file.exists())
                 self.assertTrue(json_file.exists())
 
@@ -756,8 +756,8 @@ class TestPhase15Reporting(unittest.TestCase):
                 ]
                 mod.main()
 
-                md_file = res_dir / "strategy_comparison_phase1.5.md"
-                json_file = res_dir / "strategy_comparison_phase1.5.json"
+                md_file = res_dir / "strategy_comparison_phase1.5_max4.md"
+                json_file = res_dir / "strategy_comparison_phase1.5_max4.json"
                 self.assertTrue(md_file.exists())
                 self.assertTrue(json_file.exists())
 
@@ -957,15 +957,15 @@ class TestPhase15Reporting(unittest.TestCase):
                 with patch.dict("sys.modules", {"matplotlib": mock_matplotlib, "matplotlib.pyplot": mock_plt}):
                     mod.main()
 
-                plot_png = res_dir / f"rate_distortion_frontier_{dataset}_phase1.5.png"
+                plot_png = res_dir / f"rate_distortion_frontier_{dataset}_phase1.5_max4.png"
                 self.assertTrue(plot_png.exists())
-                length_plot_png = res_dir / f"length_comparison_{dataset}_phase1.5.png"
+                length_plot_png = res_dir / f"length_comparison_{dataset}_phase1.5_max4.png"
                 self.assertTrue(length_plot_png.exists())
                 # Verify duplicate strategy_comparison file was eliminated
-                duplicate_png = res_dir / f"strategy_comparison_{dataset}_phase1.5.png"
+                duplicate_png = res_dir / f"strategy_comparison_{dataset}_phase1.5_max4.png"
                 self.assertFalse(duplicate_png.exists())
 
-                md_file = res_dir / f"strategy_comparison_phase1.5.md"
+                md_file = res_dir / f"strategy_comparison_phase1.5_max4.md"
                 with open(md_file) as f:
                     md_text = f.read()
 
@@ -1078,19 +1078,19 @@ class TestPhase15Reporting(unittest.TestCase):
                 with patch.dict("sys.modules", {"matplotlib": mock_matplotlib, "matplotlib.pyplot": mock_plt}):
                     mod.main()
 
-                plot_png = res_dir / f"rate_distortion_frontier_{dataset}.png"
-                length_plot_png = res_dir / f"length_comparison_{dataset}.png"
+                plot_png = res_dir / f"rate_distortion_frontier_{dataset}_max4.png"
+                length_plot_png = res_dir / f"length_comparison_{dataset}_max4.png"
 
                 # Single unified plot exists
                 self.assertTrue(plot_png.exists())
-                self.assertFalse((res_dir / f"rate_distortion_frontier_{dataset}_phase1.png").exists())
-                self.assertFalse((res_dir / f"rate_distortion_frontier_{dataset}_phase1.5.png").exists())
+                self.assertFalse((res_dir / f"rate_distortion_frontier_{dataset}_phase1_max4.png").exists())
+                self.assertFalse((res_dir / f"rate_distortion_frontier_{dataset}_phase1.5_max4.png").exists())
                 self.assertTrue(length_plot_png.exists())
-                self.assertFalse((res_dir / f"length_comparison_{dataset}_phase1.png").exists())
-                self.assertFalse((res_dir / f"length_comparison_{dataset}_phase1.5.png").exists())
+                self.assertFalse((res_dir / f"length_comparison_{dataset}_phase1_max4.png").exists())
+                self.assertFalse((res_dir / f"length_comparison_{dataset}_phase1.5_max4.png").exists())
 
                 # Check markdown report
-                md_file = res_dir / f"strategy_comparison.md"
+                md_file = res_dir / f"strategy_comparison_max4.md"
                 with open(md_file) as f:
                     md_text = f.read()
 
@@ -1099,12 +1099,94 @@ class TestPhase15Reporting(unittest.TestCase):
                 self.assertNotIn("### Performance & Rate-Distortion Overview", md_text)
 
                 # Check JSON output
-                json_file = res_dir / f"strategy_comparison.json"
+                json_file = res_dir / f"strategy_comparison_max4.json"
                 with open(json_file) as f:
                     jdata = json.load(f)
                 self.assertIn(plot_png.name, jdata.get("plot_files", []))
                 self.assertIn(length_plot_png.name, jdata.get("plot_files", []))
 
+            finally:
+                sys.argv = orig_argv
+
+    def test_no_duplicated_comparison_files_when_max_tags_exist(self):
+        from unittest.mock import MagicMock, patch
+        spec = importlib.util.spec_from_file_location(
+            "generate_comparison_report",
+            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            dataset = "NoDupDS"
+            data_dir = tmp_path / "data" / dataset
+            data_dir.mkdir(parents=True, exist_ok=True)
+            res_dir = tmp_path / "LETTER-TIGER" / "results" / dataset / "rqvae"
+            res_dir.mkdir(parents=True, exist_ok=True)
+
+            with open(data_dir / f"{dataset}.index.json", "w") as f:
+                json.dump({"0": [1, 2, 3, 4], "1": [2, 3, 4, 5]}, f)
+            with open(data_dir / f"{dataset}.inter.json", "w") as f:
+                json.dump({"0": [0, 1]}, f)
+
+            # Max 4 fixed and varlen files
+            with open(res_dir / "fixed_L4.json", "w") as f:
+                json.dump({"mean_results": {"hit@1": 0.05, "hit@5": 0.08, "hit@10": 0.10, "ndcg@5": 0.07, "ndcg@10": 0.08}}, f)
+            with open(res_dir / "varlen_max4.json", "w") as f:
+                json.dump({"mean_results": {"hit@1": 0.04, "hit@5": 0.07, "hit@10": 0.09, "ndcg@5": 0.06, "ndcg@10": 0.07}}, f)
+
+            # Max 10 fixed and varlen files
+            with open(res_dir / "fixed_L10.json", "w") as f:
+                json.dump({"mean_results": {"hit@1": 0.06, "hit@5": 0.09, "hit@10": 0.11, "ndcg@5": 0.08, "ndcg@10": 0.09}}, f)
+            with open(res_dir / "varlen_max10.json", "w") as f:
+                json.dump({"mean_results": {"hit@1": 0.055, "hit@5": 0.085, "hit@10": 0.105, "ndcg@5": 0.075, "ndcg@10": 0.085}}, f)
+
+            mock_plt = MagicMock()
+            mock_fig = MagicMock()
+            mock_axes = [[MagicMock(), MagicMock()], [MagicMock(), MagicMock()]]
+            for row in mock_axes:
+                for ax in row:
+                    ax.get_legend_handles_labels.return_value = ([], [])
+            mock_plt.subplots.return_value = (mock_fig, mock_axes)
+
+            def side_effect_savefig(path, **kwargs):
+                with open(path, "wb") as f:
+                    f.write(b"fake_plot")
+
+            mock_fig.savefig.side_effect = side_effect_savefig
+            mock_matplotlib = MagicMock()
+            mock_matplotlib.pyplot = mock_plt
+
+            orig_argv = sys.argv
+            try:
+                sys.argv = [
+                    "generate_comparison_report.py",
+                    "--dataset", dataset,
+                    "--repo-root", str(tmp_path),
+                    "--phase", "both",
+                    "--tokenizer", "rqvae",
+                    "--strategies", "fixed,shortest_unique",
+                ]
+                with patch.dict("sys.modules", {"matplotlib": mock_matplotlib, "matplotlib.pyplot": mock_plt}):
+                    mod.main()
+
+                # Verify tagged files exist for both max4 and max10
+                self.assertTrue((res_dir / "strategy_comparison_max4.md").exists())
+                self.assertTrue((res_dir / "strategy_comparison_max4.json").exists())
+                self.assertTrue((res_dir / f"rate_distortion_frontier_{dataset}_max4.png").exists())
+                self.assertTrue((res_dir / f"length_comparison_{dataset}_max4.png").exists())
+
+                self.assertTrue((res_dir / "strategy_comparison_max10.md").exists())
+                self.assertTrue((res_dir / "strategy_comparison_max10.json").exists())
+                self.assertTrue((res_dir / f"rate_distortion_frontier_{dataset}_max10.png").exists())
+                self.assertTrue((res_dir / f"length_comparison_{dataset}_max10.png").exists())
+
+                # Verify no duplicated untagged files were generated
+                self.assertFalse((res_dir / "strategy_comparison.md").exists())
+                self.assertFalse((res_dir / "strategy_comparison.json").exists())
+                self.assertFalse((res_dir / f"rate_distortion_frontier_{dataset}.png").exists())
+                self.assertFalse((res_dir / f"length_comparison_{dataset}.png").exists())
             finally:
                 sys.argv = orig_argv
 
@@ -1128,7 +1210,7 @@ class TestPhase15Reporting(unittest.TestCase):
                 str(report_dir), str(tmp_path / "data"), "TestDS", "rqvae"
             )
             self.assertEqual(max_l, 4)
-            self.assertEqual(tag, "")
+            self.assertEqual(tag, "_max4")
 
             # Case 2: Multi-depth fixed files (L=2, L=3, L=6)
             (report_dir / "fixed_L2.json").write_text("{}")
@@ -1139,7 +1221,7 @@ class TestPhase15Reporting(unittest.TestCase):
             )
             self.assertEqual(max_l, 6)
             self.assertEqual(depths, [2, 3, 6])
-            self.assertEqual(tag, "")
+            self.assertEqual(tag, "_max6")
 
             # Case 3: _max10 tagged files
             (report_dir / "fixed_max10.json").write_text("{}")
