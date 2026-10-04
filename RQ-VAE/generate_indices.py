@@ -191,6 +191,12 @@ if phase_mode == 1.5:
     if args_setting.target_lengths:
         from truncate_indices import resolve_target_lengths
         target_lengths = resolve_target_lengths(len(data), target_lengths=args_setting.target_lengths)
+    elif ckpt.get("target_lengths") is not None:
+        raw_lengths = ckpt.get("target_lengths")
+        if isinstance(raw_lengths, (list, tuple)):
+            target_lengths = {i: int(l) for i, l in enumerate(raw_lengths)}
+        elif isinstance(raw_lengths, dict):
+            target_lengths = {int(k): int(v) for k, v in raw_lengths.items()}
     elif args_setting.residual_threshold is not None or ckpt.get("residual_threshold") is not None:
         thresh = float(
             args_setting.residual_threshold
@@ -215,12 +221,6 @@ if phase_mode == 1.5:
                 for it_id, it_len in zip(e_idx_list, d_lens_list):
                     dynamic_lens[int(it_id)] = int(it_len)
         target_lengths = dynamic_lens
-    else:
-        raw_lengths = ckpt.get("target_lengths", None)
-        if raw_lengths is not None and isinstance(raw_lengths, (list, tuple)):
-            target_lengths = {i: int(l) for i, l in enumerate(raw_lengths)}
-        elif raw_lengths is not None and isinstance(raw_lengths, dict):
-            target_lengths = {int(k): int(v) for k, v in raw_lengths.items()}
 
     if target_lengths:
         print(f"[Phase 1.5] Generating variable-length IDs with {len(target_lengths)} target lengths.")

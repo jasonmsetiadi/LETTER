@@ -596,7 +596,7 @@ if args and hasattr(args, "num_emb_list"):
     if [[ -n "$RESIDUALS_FILE" ]]; then
       rq_train_cmd+=(--residuals_file "$RESIDUALS_FILE")
     fi
-    if [[ -n "$RESIDUAL_THRESHOLD" ]]; then
+    if [[ "$STRATEGY" == "residual" && -n "$RESIDUAL_THRESHOLD" ]]; then
       rq_train_cmd+=(--residual_threshold "$RESIDUAL_THRESHOLD")
     fi
     if [[ -n "$FIXED_INDEX_PARAM" ]]; then
