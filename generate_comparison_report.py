@@ -1017,14 +1017,14 @@ def generate_report_for_max_length(
                     discovered_items.append(res)
 
     def check_has_index(strat, ph):
-        if ph != "1.5":
-            return False
         tok_d = os.path.join(data_root, dataset, tokenizer)
         ds_d = os.path.join(data_root, dataset)
         var_t = f".max{max_length}" if min_length == 1 else f".min{min_length}-max{max_length}"
         strat_sfx = ""
         if strat == "residual":
             strat_sfx = ".res"
+        elif strat == "shortest_unique":
+            strat_sfx = ""
         elif strat.startswith("popularity:") or strat.startswith("pop-") or strat.startswith("collaborative:"):
             sig = strat.split(":", 1)[1] if ":" in strat else strat[4:]
             sig_map = {
@@ -1035,15 +1035,33 @@ def generate_report_for_max_length(
                 "cf_density": ".pop-cf",
             }
             strat_sfx = sig_map.get(sig, f".pop-{sig}")
+
+        ph_tag = "-phase1.5" if ph == "1.5" else ""
         cands = [
-            os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}-phase1.5{var_t}.json"),
-            os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}-phase1.5{var_t}.json"),
+            os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}{ph_tag}{var_t}.json"),
+            os.path.join(tok_d, f"{dataset}.index.varlen-{strat.replace(':', '-')}{ph_tag}{var_t}.json"),
+            os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}{ph_tag}{var_t}.json"),
+            os.path.join(ds_d, f"{dataset}.index.varlen-{strat.replace(':', '-')}{ph_tag}{var_t}.json"),
+            os.path.join(tok_d, f"{dataset}.index{strat_sfx}{ph_tag}{var_t}.json"),
+            os.path.join(ds_d, f"{dataset}.index{strat_sfx}{ph_tag}{var_t}.json"),
         ]
+        if ph == "1.5":
+            cands.extend([
+                os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}_phase1.5{var_t}.json"),
+                os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}_phase1.5{var_t}.json"),
+            ])
         if max_length == 4 and min_length == 1:
             cands.extend([
-                os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}-phase1.5.json"),
-                os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}-phase1.5.json"),
+                os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}{ph_tag}.json"),
+                os.path.join(tok_d, f"{dataset}.index.varlen-{strat.replace(':', '-')}{ph_tag}.json"),
+                os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}{ph_tag}.json"),
+                os.path.join(ds_d, f"{dataset}.index.varlen-{strat.replace(':', '-')}{ph_tag}.json"),
             ])
+            if ph == "1.5":
+                cands.extend([
+                    os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}_phase1.5.json"),
+                    os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}_phase1.5.json"),
+                ])
         return any(os.path.isfile(c) for c in cands)
 
     has_collab_expanded = any(
@@ -1197,10 +1215,14 @@ def generate_report_for_max_length(
                     metrics = summary_m
                     status = "completed"
 
-        sid_metric = (
-            sid_results_map.get((strat, phase))
-            or sid_results_map.get(strat, {})
-        )
+        sid_metric = sid_results_map.get((strat, phase))
+        if not sid_metric:
+            cand_m = sid_results_map.get(strat, {})
+            cand_ph = str(cand_m.get("phase", ""))
+            if phase in ("fixed", "-") or cand_ph == phase:
+                sid_metric = cand_m
+            else:
+                sid_metric = {}
         mean_l = sid_metric.get("mean_length")
         w_mean_l = sid_metric.get("traffic_weighted_length") or sid_metric.get("weighted_length")
         token_savings = sid_metric.get("token_savings_pct")
@@ -1476,6 +1498,61 @@ def generate_report_for_max_length(
     sid_indices = sid_eval.get("strategy_indices", {})
     sid_lengths = sid_eval.get("strategy_lengths", {})
 
+    def find_h2h_index_file(strat, ph):
+        tok_d = os.path.join(data_root, dataset, tokenizer)
+        ds_d = os.path.join(data_root, dataset)
+        var_t = f".max{max_length}" if min_length == 1 else f".min{min_length}-max{max_length}"
+        strat_sfx = ""
+        if strat == "residual":
+            strat_sfx = ".res"
+        elif strat == "shortest_unique":
+            strat_sfx = ""
+        elif strat.startswith("popularity:") or strat.startswith("pop-") or strat.startswith("collaborative:"):
+            sig = strat.split(":", 1)[1] if ":" in strat else strat[4:]
+            sig_map = {
+                "frequency": ".pop", "raw": ".pop", "pop": ".pop",
+                "user_entropy": ".pop-entropy", "entropy": ".pop-entropy",
+                "pagerank": ".pop-pagerank", "pr": ".pop-pagerank",
+                "co_occurrence": ".pop-cooccur", "cooccur": ".pop-cooccur",
+                "cf_density": ".pop-cf",
+            }
+            strat_sfx = sig_map.get(sig, f".pop-{sig}")
+
+        ph_tag = "-phase1.5" if ph == "1.5" else ""
+        cands = [
+            os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}{ph_tag}{var_t}.json"),
+            os.path.join(tok_d, f"{dataset}.index.varlen-{strat.replace(':', '-')}{ph_tag}{var_t}.json"),
+            os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}{ph_tag}{var_t}.json"),
+            os.path.join(ds_d, f"{dataset}.index.varlen-{strat.replace(':', '-')}{ph_tag}{var_t}.json"),
+            os.path.join(tok_d, f"{dataset}.index{strat_sfx}{ph_tag}{var_t}.json"),
+            os.path.join(ds_d, f"{dataset}.index{strat_sfx}{ph_tag}{var_t}.json"),
+        ]
+        if ph == "1.5":
+            cands.extend([
+                os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}_phase1.5{var_t}.json"),
+                os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}_phase1.5{var_t}.json"),
+            ])
+        if max_length == 4 and min_length == 1:
+            cands.extend([
+                os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}{ph_tag}.json"),
+                os.path.join(tok_d, f"{dataset}.index.varlen-{strat.replace(':', '-')}{ph_tag}.json"),
+                os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}{ph_tag}.json"),
+                os.path.join(ds_d, f"{dataset}.index.varlen-{strat.replace(':', '-')}{ph_tag}.json"),
+            ])
+            if ph == "1.5":
+                cands.extend([
+                    os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}_phase1.5.json"),
+                    os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}_phase1.5.json"),
+                ])
+        for c in cands:
+            if os.path.isfile(c):
+                try:
+                    with open(c, encoding="utf-8") as f:
+                        return json.load(f)
+                except Exception:
+                    pass
+        return None
+
     def get_h2h_sid_metrics(strat_name):
         d1 = f"{strat_name} (P1)"
         d15 = f"{strat_name} (P1.5)"
@@ -1484,10 +1561,20 @@ def generate_report_for_max_length(
         if d15 in pairwise_match and d1 in pairwise_match.get(d15, {}):
             return pairwise_mae.get(d15, {}).get(d1), pairwise_match.get(d15, {}).get(d1)
         # Direct fallback from strategy_indices and strategy_lengths if pairwise tables were skipped
-        idx1 = sid_indices.get((strat_name, "1")) or sid_indices.get(strat_name)
+        idx1 = sid_indices.get((strat_name, "1")) or (sid_indices.get(strat_name) if not any(k == (strat_name, "1.5") for k in sid_indices) else None)
         idx15 = sid_indices.get((strat_name, "1.5"))
-        len1 = sid_lengths.get((strat_name, "1")) or sid_lengths.get(strat_name)
+        len1 = sid_lengths.get((strat_name, "1")) or (sid_lengths.get(strat_name) if not any(k == (strat_name, "1.5") for k in sid_lengths) else None)
         len15 = sid_lengths.get((strat_name, "1.5"))
+
+        if idx1 is None:
+            idx1 = find_h2h_index_file(strat_name, "1")
+            if idx1:
+                len1 = {str(k): len(v) for k, v in idx1.items()}
+        if idx15 is None:
+            idx15 = find_h2h_index_file(strat_name, "1.5")
+            if idx15:
+                len15 = {str(k): len(v) for k, v in idx15.items()}
+
         if idx1 and idx15:
             cat_items = list(idx1.keys())
             if cat_items:

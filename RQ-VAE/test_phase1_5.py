@@ -738,6 +738,94 @@ class TestPhase15Reporting(unittest.TestCase):
             finally:
                 sys.argv = orig_argv
 
+    def test_head_to_head_residual_with_precomputed_indices_max10(self):
+        spec = importlib.util.spec_from_file_location(
+            "generate_comparison_report",
+            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            dataset = "ResH2HTest"
+            data_dir = tmp_path / "data" / dataset
+            tok_dir = data_dir / "rqvae"
+            tok_dir.mkdir(parents=True, exist_ok=True)
+            res_dir = tmp_path / "LETTER-TIGER" / "results" / dataset / "rqvae"
+            res_dir.mkdir(parents=True, exist_ok=True)
+
+            # Base index: 2 items with length 10
+            with open(tok_dir / f"{dataset}.index.fixed.L10.json", "w") as f:
+                json.dump({"0": list(range(10)), "1": list(range(10))}, f)
+            with open(data_dir / f"{dataset}.inter.json", "w") as f:
+                json.dump({"0": [0, 1]}, f)
+
+            # Precomputed Phase 1 residual index: Item 0 -> [1, 2, 3], Item 1 -> [4, 5, 6, 7]
+            # No residuals.json provided!
+            with open(tok_dir / f"{dataset}.index.varlen.res.max10.json", "w") as f:
+                json.dump({"0": [1, 2, 3], "1": [4, 5, 6, 7]}, f)
+
+            # Precomputed Phase 1.5 residual index: Item 0 -> [1, 2, 3] (match), Item 1 -> [4, 5, 8] (diff)
+            with open(tok_dir / f"{dataset}.index.varlen.res-phase1.5.max10.json", "w") as f:
+                json.dump({"0": [1, 2, 3], "1": [4, 5, 8]}, f)
+
+            # Fixed baseline recommendation result
+            with open(res_dir / "fixed_L10.json", "w") as f:
+                json.dump({"mean_results": {"hit@10": 0.10, "ndcg@10": 0.08}}, f)
+
+            # Phase 1 and Phase 1.5 recommendation results
+            with open(res_dir / "varlen-res_max10.json", "w") as f:
+                json.dump({"mean_results": {"hit@10": 0.11, "ndcg@10": 0.085}}, f)
+            with open(res_dir / "varlen-res_phase1.5_max10.json", "w") as f:
+                json.dump({"mean_results": {"hit@10": 0.12, "ndcg@10": 0.092}}, f)
+
+            orig_argv = sys.argv
+            try:
+                sys.argv = [
+                    "generate_comparison_report.py",
+                    "--dataset", dataset,
+                    "--repo-root", str(tmp_path),
+                    "--max-length", "10",
+                    "--phase", "both",
+                    "--tokenizer", "rqvae",
+                    "--strategies", "fixed,residual",
+                ]
+                mod.main()
+
+                md_file = res_dir / "strategy_comparison_max10.md"
+                json_file = res_dir / "strategy_comparison_max10.json"
+                self.assertTrue(md_file.exists())
+                self.assertTrue(json_file.exists())
+
+                with open(json_file) as f:
+                    data = json.load(f)
+
+                self.assertIn("phase1_vs_phase1_5_comparison", data)
+                h2h = data["phase1_vs_phase1_5_comparison"]
+                self.assertEqual(len(h2h), 1)
+                self.assertEqual(h2h[0]["strategy"], "residual")
+                self.assertEqual(h2h[0]["sid_exact_agreement_pct"], 50.0)
+                self.assertEqual(h2h[0]["length_mae_tokens"], 0.5)
+
+                # Pairwise matrices must include both residual (P1) and residual (P1.5)
+                self.assertIn("residual (P1)", data["pairwise_exact_match_pct"])
+                self.assertIn("residual (P1.5)", data["pairwise_exact_match_pct"])
+                self.assertEqual(data["pairwise_exact_match_pct"]["residual (P1)"]["residual (P1.5)"], 50.0)
+                self.assertEqual(data["pairwise_mae_tokens"]["residual (P1)"]["residual (P1.5)"], 0.5)
+
+                with open(md_file) as f:
+                    md_text = f.read()
+
+                # Verify markdown Section 4 includes populated numbers (not empty '-')
+                self.assertIn("Phase 1 vs. Phase 1.5 Head-to-Head Comparison", md_text)
+                self.assertIn("50.00%", md_text)
+                self.assertIn("0.500", md_text)
+                self.assertIn("residual (P1)", md_text)
+                self.assertIn("residual (P1.5)", md_text)
+            finally:
+                sys.argv = orig_argv
+
     def test_file_to_strategy_multi_depth_fixed(self):
         spec = importlib.util.spec_from_file_location(
             "generate_comparison_report",

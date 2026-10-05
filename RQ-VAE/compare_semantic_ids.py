@@ -330,13 +330,92 @@ def evaluate_semantic_ids(
         })
 
     def add_residual():
+        var_tag = (
+            f".max{max_length}" if min_length == 1 else f".min{min_length}-max{max_length}"
+        )
+        cand_index_files = [
+            tok_dir / f"{dataset}.index.varlen.res{var_tag}.json",
+            tok_dir / f"{dataset}.index.varlen-res{var_tag}.json",
+            dataset_dir / f"{dataset}.index.varlen.res{var_tag}.json",
+            dataset_dir / f"{dataset}.index.varlen-res{var_tag}.json",
+            tok_dir / f"{dataset}.index.res{var_tag}.json",
+            dataset_dir / f"{dataset}.index.res{var_tag}.json",
+        ]
+        if max_length == 4 and min_length == 1:
+            cand_index_files.extend([
+                tok_dir / f"{dataset}.index.varlen.res.json",
+                tok_dir / f"{dataset}.index.varlen-res.json",
+                dataset_dir / f"{dataset}.index.varlen.res.json",
+                dataset_dir / f"{dataset}.index.varlen-res.json",
+                tok_dir / f"{dataset}.index.res.json",
+                dataset_dir / f"{dataset}.index.res.json",
+            ])
+        found_index_file = next((c for c in cand_index_files if c.exists()), None)
+
+        if found_index_file:
+            with found_index_file.open(encoding="utf-8") as f:
+                idx_res = json.load(f)
+            sum_file = found_index_file.with_suffix("").with_suffix(".summary.json")
+            if not sum_file.exists():
+                sum_file = found_index_file.parent / (found_index_file.stem + ".summary.json")
+            sum_data = {}
+            if sum_file.exists():
+                try:
+                    with sum_file.open(encoding="utf-8") as sf:
+                        sum_data = json.load(sf)
+                except Exception:
+                    pass
+
+            lens_res = {str(k): len(v) for k, v in idx_res.items()}
+            res_idx = {str(k): list(v) for k, v in idx_res.items()}
+            strategy_indices["residual"] = res_idx
+            strategy_indices[("residual", "1")] = res_idx
+            strategy_lengths["residual"] = lens_res
+            strategy_lengths[("residual", "1")] = lens_res
+
+            res_mean = sum_data.get("mean_length") or (sum(lens_res.values()) / max(1, len(lens_res)))
+            res_uniq = sum_data.get("unique_ids") if "unique_ids" in sum_data else len({tuple(v) for v in idx_res.values()})
+            res_coll = sum_data.get("collisions") if "collisions" in sum_data else (len(idx_res) - res_uniq)
+            res_dist = sum_data.get("length_distribution") or dict(sorted(Counter(lens_res.values()).items()))
+            res_traffic_w = sum(len(idx_res.get(str(i), [])) * raw_freqs.get(str(i), 0) for i in items if str(i) in idx_res) / total_traffic
+            res_savings = (1.0 - res_traffic_w / max_length) * 100.0
+
+            results.append({
+                "strategy": "residual",
+                "phase": "1",
+                "signal": "residual",
+                "label": f"Residual (Thresh={residual_threshold})" if residual_threshold else "Residual",
+                "basis": f"Shortest prefix with cumulative reconstruction error <= {residual_threshold}" if residual_threshold else "Post-hoc residual reconstruction error truncation",
+                "file_tag": "res",
+                "mean_length": res_mean,
+                "traffic_weighted_length": res_traffic_w,
+                "token_savings_pct": res_savings,
+                "spearman_rho_vs_frequency": None,
+                "length_distribution": res_dist,
+                "unique_ids": res_uniq,
+                "collisions": res_coll,
+            })
+            return
+
+        cand_res_files = []
         if residuals_file:
-            res_file_cand = Path(residuals_file)
-        elif max_length != 4 and (dataset_dir / f"{dataset}.residuals.L{max_length}.json").exists():
-            res_file_cand = dataset_dir / f"{dataset}.residuals.L{max_length}.json"
-        else:
-            res_file_cand = dataset_dir / f"{dataset}.residuals.json"
-        if res_file_cand.exists():
+            cand_res_files.append(Path(residuals_file))
+        if max_length != 4:
+            cand_res_files.extend([
+                tok_dir / f"{dataset}.residuals.L{max_length}.json",
+                dataset_dir / f"{dataset}.residuals.L{max_length}.json",
+                tok_dir / f"{dataset}.residuals.max{max_length}.json",
+                dataset_dir / f"{dataset}.residuals.max{max_length}.json",
+            ])
+        cand_res_files.extend([
+            tok_dir / f"{dataset}.residuals.json",
+            dataset_dir / f"{dataset}.residuals.json",
+            tok_dir / "residuals.json",
+            dataset_dir / "residuals.json",
+        ])
+        res_file_cand = next((c for c in cand_res_files if c.exists()), None)
+
+        if res_file_cand:
             with res_file_cand.open(encoding="utf-8") as rf:
                 loaded_residuals = json.load(rf)
             trunc_res, lens_res = truncate_indices(
@@ -352,7 +431,7 @@ def evaluate_semantic_ids(
             strategy_indices["residual"] = res_idx
             strategy_indices[("residual", "1")] = res_idx
             strategy_lengths["residual"] = res_lens
-            strategy_lengths[("residual", "1")] = res_lens
+            strategy_lengths[("residual", "1")] = lens_res
             res_mean = sum(lens_res.values()) / len(lens_res)
             res_traffic_w = sum(lens_res[i] * raw_freqs.get(str(i), 0) for i in trunc_res) / total_traffic
             res_savings = (1.0 - res_traffic_w / max_length) * 100.0
@@ -363,8 +442,8 @@ def evaluate_semantic_ids(
                 "strategy": "residual",
                 "phase": "1",
                 "signal": "residual",
-                "label": f"Residual (Thresh={residual_threshold})",
-                "basis": f"Shortest prefix with cumulative reconstruction error <= {residual_threshold}",
+                "label": f"Residual (Thresh={residual_threshold})" if residual_threshold else "Residual",
+                "basis": f"Shortest prefix with cumulative reconstruction error <= {residual_threshold}" if residual_threshold else "Post-hoc residual reconstruction error truncation",
                 "file_tag": "res",
                 "mean_length": res_mean,
                 "traffic_weighted_length": res_traffic_w,
@@ -388,6 +467,22 @@ def evaluate_semantic_ids(
                 i_cand = existing_indices.get(("residual", "1")) or existing_indices.get("residual")
                 strategy_indices["residual"] = i_cand
                 strategy_indices[("residual", "1")] = i_cand
+        else:
+            results.append({
+                "strategy": "residual",
+                "phase": "1",
+                "signal": "residual",
+                "label": "Residual",
+                "basis": "Post-hoc residual reconstruction error truncation",
+                "file_tag": "res",
+                "mean_length": None,
+                "traffic_weighted_length": None,
+                "token_savings_pct": None,
+                "spearman_rho_vs_frequency": None,
+                "length_distribution": {},
+                "unique_ids": 0,
+                "collisions": 0,
+            })
 
     def add_signal(sig, strat_key=None):
         if strat_key is None:
