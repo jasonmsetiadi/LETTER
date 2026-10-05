@@ -1131,7 +1131,7 @@ def generate_report_for_max_length(
         st = r["strategy"]
         ph = str(r.get("phase", "1"))
         sid_results_map[(st, ph)] = r
-        if st not in sid_results_map:
+        if st not in sid_results_map and ph in ("fixed", "-"):
             sid_results_map[st] = r
 
     items_count = sid_eval.get("items_count", None)
@@ -1216,17 +1216,14 @@ def generate_report_for_max_length(
                     status = "completed"
 
         sid_metric = sid_results_map.get((strat, phase))
-        if not sid_metric:
-            cand_m = sid_results_map.get(strat, {})
-            cand_ph = str(cand_m.get("phase", ""))
-            if phase in ("fixed", "-") or cand_ph == phase:
-                sid_metric = cand_m
-            else:
-                sid_metric = {}
+        if not sid_metric and phase in ("fixed", "-"):
+            sid_metric = sid_results_map.get(strat, {})
+        elif not sid_metric:
+            sid_metric = {}
         mean_l = sid_metric.get("mean_length")
         w_mean_l = sid_metric.get("traffic_weighted_length") or sid_metric.get("weighted_length")
         token_savings = sid_metric.get("token_savings_pct")
-        collisions = sid_metric.get("collisions", 0)
+        collisions = sid_metric.get("collisions") if mean_l is not None else None
         length_dist = sid_metric.get("length_distribution", {})
         rho = sid_metric.get("spearman_rho_vs_frequency")
         label = sid_metric.get("label", strat)
@@ -1361,7 +1358,7 @@ def generate_report_for_max_length(
         wml_val = row["weighted_length"]
         ml_str = f"{ml_val:.2f}" if ml_val is not None else "-"
         wml_str = f"{wml_val:.2f}" if wml_val is not None else "-"
-        col_str = str(row["collisions"])
+        col_str = str(row["collisions"]) if row.get("mean_length") is not None and row.get("collisions") is not None else "-"
         m = row["metrics"]
 
         if row["status"] == "completed":
@@ -1441,7 +1438,7 @@ def generate_report_for_max_length(
         else:
             layer_vals = ["-" for _ in layer_keys]
         layer_val_str = " | ".join(f"{v:>{w}}" for v, w in zip(layer_vals, layer_widths))
-        col_str = str(row["collisions"])
+        col_str = str(row["collisions"]) if ml_val is not None and row.get("collisions") is not None else "-"
         rho_val = row["spearman_rho_vs_frequency"]
         rho_str = f"{rho_val:10.4f}" if rho_val is not None else "         -"
         sid_lines.append(
@@ -1749,7 +1746,7 @@ def generate_report_for_max_length(
         wml = f"{wml_val:.2f}" if wml_val is not None else "-"
         strat_name = row["strategy"]
         st = row["status"]
-        col = row["collisions"]
+        col = str(row["collisions"]) if ml_val is not None and row.get("collisions") is not None else "-"
         if st == "completed":
             h1 = f"{m.get('hit@1', 0)*100:.2f}%"
             h5 = f"{m.get('hit@5', 0)*100:.2f}%"
@@ -1794,7 +1791,7 @@ def generate_report_for_max_length(
             ]
         else:
             layer_vals = ["-" for _ in layer_keys]
-        col = str(row["collisions"])
+        col = str(row["collisions"]) if ml_val is not None and row.get("collisions") is not None else "-"
         rho_val = row["spearman_rho_vs_frequency"]
         rho = f"{rho_val:.4f}" if rho_val is not None else "-"
         md_lines.append(

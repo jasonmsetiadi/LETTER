@@ -204,15 +204,31 @@ def evaluate_semantic_ids(
 
     if index_file is None:
         cand_list = []
-        if max_length:
+        if max_length and max_length != 4:
             cand_list.extend([
                 tok_dir / f"{dataset}.index.fixed.L{max_length}.json",
                 tok_dir / f"{dataset}.index.fixed-for-varlen.L{max_length}.json",
                 dataset_dir / f"{dataset}.index.fixed.L{max_length}.json",
                 dataset_dir / f"{dataset}.index.fixed-for-varlen.L{max_length}.json",
             ])
-        cand_list.append(dataset_dir / f"{dataset}.index.json")
-        index_file = next((c for c in cand_list if c.exists()), cand_list[0] if cand_list else tok_dir / f"{dataset}.index.fixed.L4.json")
+        else:
+            cand_list.extend([
+                tok_dir / f"{dataset}.index.fixed.L4.json",
+                tok_dir / f"{dataset}.index.fixed-for-varlen.L4.json",
+                tok_dir / f"{dataset}.index.fixed.json",
+                dataset_dir / f"{dataset}.index.fixed.L4.json",
+                dataset_dir / f"{dataset}.index.fixed-for-varlen.L4.json",
+                dataset_dir / f"{dataset}.index.fixed.json",
+                dataset_dir / f"{dataset}.index.json",
+                tok_dir / f"{dataset}.index.json",
+            ])
+        found_idx = next((c for c in cand_list if c.exists()), None)
+        if found_idx:
+            index_file = found_idx
+        elif max_length and max_length != 4:
+            index_file = cand_list[0] if cand_list else tok_dir / f"{dataset}.index.fixed.L{max_length}.json"
+        else:
+            index_file = dataset_dir / f"{dataset}.index.json"
     index_file = Path(index_file)
     if not index_file.exists():
         raise FileNotFoundError(f"Index file not found: {index_file}")
@@ -254,6 +270,13 @@ def evaluate_semantic_ids(
             dataset_dir / f"{dataset}.index.fixed.L{d}.json",
             dataset_dir / f"{dataset}.index.fixed-for-varlen.L{d}.json",
         ]
+        if d == 4:
+            d_candidates.extend([
+                tok_dir / f"{dataset}.index.fixed.json",
+                dataset_dir / f"{dataset}.index.fixed.json",
+                dataset_dir / f"{dataset}.index.json",
+                tok_dir / f"{dataset}.index.json",
+            ])
         for dc in d_candidates:
             if dc.exists():
                 try:
@@ -268,31 +291,54 @@ def evaluate_semantic_ids(
             c_count = len(loaded_d_index) - u_ids
             trunc_fixed = loaded_d_index
         else:
-            trunc_fixed = {i: c[:d] for i, c in indices.items()}
-            u_ids = len({tuple(c) for c in trunc_fixed.values()})
-            c_count = len(trunc_fixed) - u_ids
+            first_len = len(next(iter(indices.values()))) if indices else 0
+            if first_len >= d:
+                trunc_fixed = {i: c[:d] for i, c in indices.items()}
+                u_ids = len({tuple(c) for c in trunc_fixed.values()})
+                c_count = len(trunc_fixed) - u_ids
+            else:
+                trunc_fixed = None
+                u_ids = 0
+                c_count = 0
 
-        fixed_idx = {str(k): list(v) for k, v in trunc_fixed.items()}
-        strategy_indices[s_name] = fixed_idx
-        strategy_indices[(s_name, "fixed")] = fixed_idx
-        strategy_lengths[s_name] = {str(i): d for i in items}
-        strategy_lengths[(s_name, "fixed")] = strategy_lengths[s_name]
+        if trunc_fixed is not None:
+            fixed_idx = {str(k): list(v) for k, v in trunc_fixed.items()}
+            strategy_indices[s_name] = fixed_idx
+            strategy_indices[(s_name, "fixed")] = fixed_idx
+            strategy_lengths[s_name] = {str(i): d for i in items}
+            strategy_lengths[(s_name, "fixed")] = strategy_lengths[s_name]
 
-        results.append({
-            "strategy": s_name,
-            "phase": "fixed",
-            "signal": "fixed",
-            "label": f"Fixed (L={d})",
-            "basis": f"Uniform fixed codebook depth L={d}",
-            "file_tag": s_name,
-            "mean_length": float(d),
-            "traffic_weighted_length": float(d),
-            "token_savings_pct": ((max_length - d) / max_length * 100.0) if max_length > 0 else 0.0,
-            "spearman_rho_vs_frequency": None,
-            "length_distribution": {d: len(indices)},
-            "unique_ids": u_ids,
-            "collisions": c_count,
-        })
+            results.append({
+                "strategy": s_name,
+                "phase": "fixed",
+                "signal": "fixed",
+                "label": f"Fixed (L={d})",
+                "basis": f"Uniform fixed codebook depth L={d}",
+                "file_tag": s_name,
+                "mean_length": float(d),
+                "traffic_weighted_length": float(d),
+                "token_savings_pct": ((max_length - d) / max_length * 100.0) if max_length > 0 else 0.0,
+                "spearman_rho_vs_frequency": None,
+                "length_distribution": {d: len(indices)},
+                "unique_ids": u_ids,
+                "collisions": c_count,
+            })
+        else:
+            results.append({
+                "strategy": s_name,
+                "phase": "fixed",
+                "signal": "fixed",
+                "label": f"Fixed (L={d})",
+                "basis": f"Uniform fixed codebook depth L={d}",
+                "file_tag": s_name,
+                "mean_length": None,
+                "traffic_weighted_length": None,
+                "token_savings_pct": None,
+                "spearman_rho_vs_frequency": None,
+                "length_distribution": {},
+                "unique_ids": 0,
+                "collisions": 0,
+            })
 
     def add_shortest_unique():
         trunc_su, lens_su = truncate_indices(
@@ -355,16 +401,6 @@ def evaluate_semantic_ids(
         if found_index_file:
             with found_index_file.open(encoding="utf-8") as f:
                 idx_res = json.load(f)
-            sum_file = found_index_file.with_suffix("").with_suffix(".summary.json")
-            if not sum_file.exists():
-                sum_file = found_index_file.parent / (found_index_file.stem + ".summary.json")
-            sum_data = {}
-            if sum_file.exists():
-                try:
-                    with sum_file.open(encoding="utf-8") as sf:
-                        sum_data = json.load(sf)
-                except Exception:
-                    pass
 
             lens_res = {str(k): len(v) for k, v in idx_res.items()}
             res_idx = {str(k): list(v) for k, v in idx_res.items()}
@@ -373,10 +409,10 @@ def evaluate_semantic_ids(
             strategy_lengths["residual"] = lens_res
             strategy_lengths[("residual", "1")] = lens_res
 
-            res_mean = sum_data.get("mean_length") or (sum(lens_res.values()) / max(1, len(lens_res)))
-            res_uniq = sum_data.get("unique_ids") if "unique_ids" in sum_data else len({tuple(v) for v in idx_res.values()})
-            res_coll = sum_data.get("collisions") if "collisions" in sum_data else (len(idx_res) - res_uniq)
-            res_dist = sum_data.get("length_distribution") or dict(sorted(Counter(lens_res.values()).items()))
+            res_mean = sum(lens_res.values()) / max(1, len(lens_res))
+            res_uniq = len({tuple(v) for v in idx_res.values()})
+            res_coll = len(idx_res) - res_uniq
+            res_dist = dict(sorted(Counter(lens_res.values()).items()))
             res_traffic_w = sum(len(idx_res.get(str(i), [])) * raw_freqs.get(str(i), 0) for i in items if str(i) in idx_res) / total_traffic
             res_savings = (1.0 - res_traffic_w / max_length) * 100.0
 
@@ -407,12 +443,15 @@ def evaluate_semantic_ids(
                 tok_dir / f"{dataset}.residuals.max{max_length}.json",
                 dataset_dir / f"{dataset}.residuals.max{max_length}.json",
             ])
-        cand_res_files.extend([
-            tok_dir / f"{dataset}.residuals.json",
-            dataset_dir / f"{dataset}.residuals.json",
-            tok_dir / "residuals.json",
-            dataset_dir / "residuals.json",
-        ])
+        else:
+            cand_res_files.extend([
+                tok_dir / f"{dataset}.residuals.L4.json",
+                dataset_dir / f"{dataset}.residuals.L4.json",
+                tok_dir / f"{dataset}.residuals.json",
+                dataset_dir / f"{dataset}.residuals.json",
+                tok_dir / "residuals.json",
+                dataset_dir / "residuals.json",
+            ])
         res_file_cand = next((c for c in cand_res_files if c.exists()), None)
 
         if res_file_cand:
@@ -453,20 +492,6 @@ def evaluate_semantic_ids(
                 "unique_ids": res_uniq,
                 "collisions": res_coll,
             })
-        elif existing_sid_entries and ("residual" in existing_sid_entries or ("residual", "1") in existing_sid_entries):
-            prev = dict(existing_sid_entries.get(("residual", "1")) or existing_sid_entries.get("residual"))
-            prev["strategy"] = "residual"
-            prev["phase"] = "1"
-            prev["signal"] = "residual"
-            results.append(prev)
-            if existing_lengths and ("residual" in existing_lengths or ("residual", "1") in existing_lengths):
-                l_cand = existing_lengths.get(("residual", "1")) or existing_lengths.get("residual")
-                strategy_lengths["residual"] = l_cand
-                strategy_lengths[("residual", "1")] = l_cand
-            if existing_indices and ("residual" in existing_indices or ("residual", "1") in existing_indices):
-                i_cand = existing_indices.get(("residual", "1")) or existing_indices.get("residual")
-                strategy_indices["residual"] = i_cand
-                strategy_indices[("residual", "1")] = i_cand
         else:
             results.append({
                 "strategy": "residual",
@@ -496,23 +521,21 @@ def evaluate_semantic_ids(
                 except ImportError:
                     can_compute = False
             if not can_compute:
-                prev_cand = None
-                if existing_sid_entries:
-                    prev_cand = existing_sid_entries.get((strat_key, "1")) or existing_sid_entries.get(strat_key)
-                if prev_cand:
-                    prev = dict(prev_cand)
-                    prev["strategy"] = strat_key
-                    prev["phase"] = "1"
-                    prev["signal"] = strat_key
-                    results.append(prev)
-                    if existing_lengths and (strat_key in existing_lengths or (strat_key, "1") in existing_lengths):
-                        l_cand = existing_lengths.get((strat_key, "1")) or existing_lengths.get(strat_key)
-                        strategy_lengths[strat_key] = l_cand
-                        strategy_lengths[(strat_key, "1")] = l_cand
-                    if existing_indices and (strat_key in existing_indices or (strat_key, "1") in existing_indices):
-                        i_cand = existing_indices.get((strat_key, "1")) or existing_indices.get(strat_key)
-                        strategy_indices[strat_key] = i_cand
-                        strategy_indices[(strat_key, "1")] = i_cand
+                results.append({
+                    "strategy": strat_key,
+                    "phase": "1",
+                    "signal": strat_key,
+                    "label": meta.get("label", strat_key),
+                    "basis": meta.get("basis", ""),
+                    "file_tag": meta.get("file_tag", strat_key),
+                    "mean_length": None,
+                    "traffic_weighted_length": None,
+                    "token_savings_pct": None,
+                    "spearman_rho_vs_frequency": None,
+                    "length_distribution": {},
+                    "unique_ids": 0,
+                    "collisions": 0,
+                })
                 return
 
         scores, _ = compute_interaction_signals(
@@ -606,35 +629,31 @@ def evaluate_semantic_ids(
         cand_files = [
             tok_dir / f"{dataset}.index.varlen{strat_suffix}-phase1.5{var_tag}.json",
             dataset_dir / f"{dataset}.index.varlen{strat_suffix}-phase1.5{var_tag}.json",
+            tok_dir / f"{dataset}.index.varlen{strat_suffix}_phase1.5{var_tag}.json",
+            dataset_dir / f"{dataset}.index.varlen{strat_suffix}_phase1.5{var_tag}.json",
         ]
+        if max_length == 4 and min_length == 1:
+            cand_files.extend([
+                tok_dir / f"{dataset}.index.varlen{strat_suffix}-phase1.5.json",
+                dataset_dir / f"{dataset}.index.varlen{strat_suffix}-phase1.5.json",
+                tok_dir / f"{dataset}.index.varlen{strat_suffix}_phase1.5.json",
+                dataset_dir / f"{dataset}.index.varlen{strat_suffix}_phase1.5.json",
+            ])
         found_file = next((c for c in cand_files if c.exists()), None)
 
         if found_file:
             with found_file.open(encoding="utf-8") as f:
                 idx_p15 = json.load(f)
 
-            # Check summary file
-            sum_file = found_file.with_suffix("").with_suffix(".summary.json")
-            if not sum_file.exists():
-                sum_file = found_file.parent / (found_file.stem + ".summary.json")
-
-            sum_data = {}
-            if sum_file.exists():
-                try:
-                    with sum_file.open(encoding="utf-8") as sf:
-                        sum_data = json.load(sf)
-                except Exception:
-                    pass
-
             lens_p15 = {str(k): len(v) for k, v in idx_p15.items()}
             p15_indices = {str(k): list(v) for k, v in idx_p15.items()}
             strategy_lengths[(strat_key, "1.5")] = lens_p15
             strategy_indices[(strat_key, "1.5")] = p15_indices
 
-            mean_len = sum_data.get("mean_length") or (sum(lens_p15.values()) / max(1, len(lens_p15)))
-            unique_ids = sum_data.get("unique_ids") if "unique_ids" in sum_data else len({tuple(v) for v in idx_p15.values()})
-            collisions = sum_data.get("collisions") if "collisions" in sum_data else (len(idx_p15) - unique_ids)
-            length_dist = sum_data.get("length_distribution") or dict(sorted(Counter(lens_p15.values()).items()))
+            mean_len = sum(lens_p15.values()) / max(1, len(lens_p15))
+            unique_ids = len({tuple(v) for v in idx_p15.values()})
+            collisions = len(idx_p15) - unique_ids
+            length_dist = dict(sorted(Counter(lens_p15.values()).items()))
 
             traffic_w_len = sum(len(idx_p15.get(str(i), [])) * raw_freqs.get(str(i), 0) for i in items if str(i) in idx_p15) / total_traffic
             token_savings_pct = (1.0 - traffic_w_len / max_length) * 100.0
@@ -666,41 +685,6 @@ def evaluate_semantic_ids(
                 "unique_ids": unique_ids,
                 "collisions": collisions,
             })
-        elif existing_sid_entries and (
-            (strat_key, "1.5") in existing_sid_entries
-            or f"{strat_key}_phase1.5" in existing_sid_entries
-            or f"{strat_key}:phase1.5" in existing_sid_entries
-        ):
-            prev = dict(
-                existing_sid_entries.get((strat_key, "1.5"))
-                or existing_sid_entries.get(f"{strat_key}_phase1.5")
-                or existing_sid_entries.get(f"{strat_key}:phase1.5")
-            )
-            prev["strategy"] = strat_key
-            prev["phase"] = "1.5"
-            results.append(prev)
-            if existing_lengths and (
-                (strat_key, "1.5") in existing_lengths
-                or f"{strat_key}_phase1.5" in existing_lengths
-                or f"{strat_key}:phase1.5" in existing_lengths
-            ):
-                l_cand = (
-                    existing_lengths.get((strat_key, "1.5"))
-                    or existing_lengths.get(f"{strat_key}_phase1.5")
-                    or existing_lengths.get(f"{strat_key}:phase1.5")
-                )
-                strategy_lengths[(strat_key, "1.5")] = l_cand
-            if existing_indices and (
-                (strat_key, "1.5") in existing_indices
-                or f"{strat_key}_phase1.5" in existing_indices
-                or f"{strat_key}:phase1.5" in existing_indices
-            ):
-                i_cand = (
-                    existing_indices.get((strat_key, "1.5"))
-                    or existing_indices.get(f"{strat_key}_phase1.5")
-                    or existing_indices.get(f"{strat_key}:phase1.5")
-                )
-                strategy_indices[(strat_key, "1.5")] = i_cand
         else:
             results.append({
                 "strategy": strat_key,

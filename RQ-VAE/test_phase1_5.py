@@ -826,6 +826,183 @@ class TestPhase15Reporting(unittest.TestCase):
             finally:
                 sys.argv = orig_argv
 
+    def test_strict_file_lookup_no_fallback_on_max10(self):
+        from compare_semantic_ids import evaluate_semantic_ids
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            dataset = "StrictLookupDS"
+            data_dir = tmp_path / "data" / dataset
+            tok_dir = data_dir / "rqvae"
+            tok_dir.mkdir(parents=True, exist_ok=True)
+
+            # Fixed index for max_length=10
+            fixed_idx = {"0": list(range(10)), "1": list(range(10))}
+            with open(tok_dir / f"{dataset}.index.fixed.L10.json", "w") as f:
+                json.dump(fixed_idx, f)
+
+            with open(data_dir / f"{dataset}.inter.json", "w") as f:
+                json.dump({"0": [0, 1]}, f)
+
+            # 4-layer residual file exists on disk, but NO 10-layer residual file exists
+            with open(tok_dir / f"{dataset}.residuals.json", "w") as f:
+                json.dump({"0": [0.5, 0.1, 0.05, 0.0], "1": [0.5, 0.1, 0.05, 0.0]}, f)
+
+            # 4-layer summary file exists on disk (from an old max-4 run)
+            with open(tok_dir / f"{dataset}.index.varlen.pop-phase1.5.summary.json", "w") as f:
+                json.dump({
+                    "mean_length": 3.558,
+                    "length_distribution": {1: 1, 2: 1, 3: 1, 4: 1},
+                    "unique_ids": 2,
+                    "collisions": 0,
+                }, f)
+
+            # 10-layer Phase 1.5 popularity index
+            p15_idx = {"0": list(range(9)), "1": list(range(10))}
+            with open(tok_dir / f"{dataset}.index.varlen.pop-phase1.5.max10.json", "w") as f:
+                json.dump(p15_idx, f)
+
+            eval_res = evaluate_semantic_ids(
+                dataset=dataset,
+                tokenizer="rqvae",
+                repo_root=tmp_path,
+                data_root=tmp_path / "data",
+                min_length=1,
+                max_length=10,
+                strategies=[("fixed", "fixed"), ("residual", "1"), ("popularity:frequency", "1.5")],
+            )
+
+            res_by_strat = {(r["strategy"], r["phase"]): r for r in eval_res["results"]}
+
+            # 1. Residual (Phase 1) MUST NOT fall back to 4-layer residuals.json; must be blank (None)
+            res_entry = res_by_strat[("residual", "1")]
+            self.assertIsNone(res_entry["mean_length"])
+            self.assertEqual(res_entry["length_distribution"], {})
+            self.assertEqual(res_entry["collisions"], 0)
+
+            # 2. Popularity (Phase 1.5) MUST use 10-layer index and NOT the 4-layer summary file
+            p15_entry = res_by_strat[("popularity:frequency", "1.5")]
+            self.assertAlmostEqual(p15_entry["mean_length"], 9.5)
+            self.assertEqual(p15_entry["length_distribution"], {9: 1, 10: 1})
+            self.assertNotEqual(p15_entry["mean_length"], 3.558)
+
+    def test_missing_max10_index_file_does_not_fallback_to_depth4(self):
+        from compare_semantic_ids import evaluate_semantic_ids
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            dataset = "NoFallbackDS"
+            data_dir = tmp_path / "data" / dataset
+            tok_dir = data_dir / "rqvae"
+            tok_dir.mkdir(parents=True, exist_ok=True)
+
+            # Only a 4-layer base index exists
+            with open(data_dir / f"{dataset}.index.json", "w") as f:
+                json.dump({"0": [1, 2, 3, 4], "1": [5, 6, 7, 8]}, f)
+            with open(data_dir / f"{dataset}.inter.json", "w") as f:
+                json.dump({"0": [0, 1]}, f)
+
+            # Asking for max_length=10 without index_file must NOT fall back to dataset.index.json
+            with self.assertRaises(FileNotFoundError):
+                evaluate_semantic_ids(
+                    dataset=dataset,
+                    tokenizer="rqvae",
+                    repo_root=tmp_path,
+                    data_root=tmp_path / "data",
+                    min_length=1,
+                    max_length=10,
+                )
+
+    def test_report_generation_missing_file_leaves_blank_max10(self):
+        spec = importlib.util.spec_from_file_location(
+            "generate_comparison_report",
+            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            dataset = "MissingBlankDS"
+            data_dir = tmp_path / "data" / dataset
+            tok_dir = data_dir / "rqvae"
+            tok_dir.mkdir(parents=True, exist_ok=True)
+            res_dir = tmp_path / "LETTER-TIGER" / "results" / dataset / "rqvae"
+            res_dir.mkdir(parents=True, exist_ok=True)
+
+            # Fixed index for max_length=10
+            with open(tok_dir / f"{dataset}.index.fixed.L10.json", "w") as f:
+                json.dump({"0": list(range(10)), "1": list(range(10))}, f)
+            with open(data_dir / f"{dataset}.inter.json", "w") as f:
+                json.dump({"0": [0, 1]}, f)
+
+            # Fixed baseline recommendation result
+            with open(res_dir / "fixed_L10.json", "w") as f:
+                json.dump({"mean_results": {"hit@10": 0.10, "ndcg@10": 0.08}}, f)
+
+            # Phase 1 recommendation result exists
+            with open(res_dir / "varlen-pop_max10.json", "w") as f:
+                json.dump({"mean_results": {"hit@10": 0.09, "ndcg@10": 0.07}}, f)
+
+            # Phase 1.5 recommendation result exists, BUT Phase 1.5 index does NOT exist
+            with open(res_dir / "varlen-pop_phase1.5_max10.json", "w") as f:
+                json.dump({"mean_results": {"hit@10": 0.095, "ndcg@10": 0.075}}, f)
+
+            orig_argv = sys.argv
+            try:
+                sys.argv = [
+                    "generate_comparison_report.py",
+                    "--dataset", dataset,
+                    "--repo-root", str(tmp_path),
+                    "--max-length", "10",
+                    "--phase", "both",
+                    "--tokenizer", "rqvae",
+                    "--strategies", "fixed,popularity:frequency",
+                ]
+                mod.main()
+
+                md_file = res_dir / "strategy_comparison_max10.md"
+                json_file = res_dir / "strategy_comparison_max10.json"
+                self.assertTrue(md_file.exists())
+                self.assertTrue(json_file.exists())
+
+                with open(json_file) as f:
+                    data = json.load(f)
+
+                # Find popularity:frequency entries
+                recom_entries = {
+                    (r["strategy"], r["phase"]): r for r in data["strategy_comparison"]
+                }
+                sid_entries = {
+                    (r["strategy"], r["phase"]): r for r in data["semantic_id_metrics"]
+                }
+
+                # Phase 1 is completed
+                p1_recom = recom_entries[("popularity:frequency", "1")]
+                self.assertEqual(p1_recom["status"], "completed")
+                self.assertIsNotNone(p1_recom["mean_length"])
+
+                # Phase 1.5 recommendation is completed, but its Semantic ID index is blank (None)
+                p15_recom = recom_entries[("popularity:frequency", "1.5")]
+                self.assertEqual(p15_recom["status"], "completed")
+                self.assertIsNone(p15_recom["mean_length"])
+                self.assertIsNone(p15_recom["collisions"])
+
+                p15_sid = sid_entries[("popularity:frequency", "1.5")]
+                self.assertIsNone(p15_sid["mean_length"])
+                self.assertIsNone(p15_sid["collisions"])
+                self.assertEqual(p15_sid["length_distribution"], {})
+
+                # In markdown:
+                with open(md_file) as f:
+                    md_text = f.read()
+
+                # Phase 1.5 row in Table 2 must have '-' for mean length and collisions
+                self.assertIn("| **popularity:frequency** | 1.5 | - | - | - | - | - | - | - | - | - | - | - | - | - | - |", md_text)
+
+            finally:
+                sys.argv = orig_argv
+
     def test_file_to_strategy_multi_depth_fixed(self):
         spec = importlib.util.spec_from_file_location(
             "generate_comparison_report",
