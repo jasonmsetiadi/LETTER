@@ -186,12 +186,14 @@ def evaluate_semantic_ids(
     strategies=None,
     existing_sid_entries=None,
     existing_lengths=None,
+    existing_indices=None,
 ):
     """Core evaluation function comparing Semantic ID generation strategies on CPU.
 
     Returns a dictionary containing:
       - 'results': list of per-strategy metric dictionaries
       - 'strategy_lengths': dict mapping strategy -> {item_id: length}
+      - 'strategy_indices': dict mapping strategy -> {item_id: [token_ids]}
       - 'pairwise_exact_match_pct': dict mapping s1 -> {s2: match_pct}
       - 'pairwise_mae_tokens': dict mapping s1 -> {s2: mae_diff}
     """
@@ -239,11 +241,11 @@ def evaluate_semantic_ids(
 
     results = []
     strategy_lengths = {}
+    strategy_indices = {}
 
     def add_fixed(depth=None, strat_name=None):
         d = depth if depth is not None else max_length
         s_name = strat_name or ("fixed" if d == max_length else f"fixed_L{d}")
-        strategy_lengths[s_name] = {str(i): d for i in items}
 
         loaded_d_index = None
         d_candidates = [
@@ -264,10 +266,17 @@ def evaluate_semantic_ids(
         if loaded_d_index:
             u_ids = len({tuple(x) for x in loaded_d_index.values()})
             c_count = len(loaded_d_index) - u_ids
+            trunc_fixed = loaded_d_index
         else:
             trunc_fixed = {i: c[:d] for i, c in indices.items()}
             u_ids = len({tuple(c) for c in trunc_fixed.values()})
             c_count = len(trunc_fixed) - u_ids
+
+        fixed_idx = {str(k): list(v) for k, v in trunc_fixed.items()}
+        strategy_indices[s_name] = fixed_idx
+        strategy_indices[(s_name, "fixed")] = fixed_idx
+        strategy_lengths[s_name] = {str(i): d for i in items}
+        strategy_lengths[(s_name, "fixed")] = strategy_lengths[s_name]
 
         results.append({
             "strategy": s_name,
@@ -292,7 +301,12 @@ def evaluate_semantic_ids(
             max_length=max_length,
             strategy="shortest_unique",
         )
-        strategy_lengths["shortest_unique"] = {str(k): v for k, v in lens_su.items()}
+        su_idx = {str(k): list(v) for k, v in trunc_su.items()}
+        su_lens = {str(k): v for k, v in lens_su.items()}
+        strategy_indices["shortest_unique"] = su_idx
+        strategy_indices[("shortest_unique", "1")] = su_idx
+        strategy_lengths["shortest_unique"] = su_lens
+        strategy_lengths[("shortest_unique", "1")] = su_lens
         su_mean = sum(lens_su.values()) / len(lens_su)
         su_traffic_w = sum(lens_su[i] * raw_freqs.get(str(i), 0) for i in trunc_su) / total_traffic
         su_savings = (1.0 - su_traffic_w / max_length) * 100.0
@@ -333,7 +347,12 @@ def evaluate_semantic_ids(
                 residuals=loaded_residuals,
                 residual_threshold=residual_threshold,
             )
-            strategy_lengths["residual"] = {str(k): v for k, v in lens_res.items()}
+            res_idx = {str(k): list(v) for k, v in trunc_res.items()}
+            res_lens = {str(k): v for k, v in lens_res.items()}
+            strategy_indices["residual"] = res_idx
+            strategy_indices[("residual", "1")] = res_idx
+            strategy_lengths["residual"] = res_lens
+            strategy_lengths[("residual", "1")] = res_lens
             res_mean = sum(lens_res.values()) / len(lens_res)
             res_traffic_w = sum(lens_res[i] * raw_freqs.get(str(i), 0) for i in trunc_res) / total_traffic
             res_savings = (1.0 - res_traffic_w / max_length) * 100.0
@@ -361,8 +380,14 @@ def evaluate_semantic_ids(
             prev["phase"] = "1"
             prev["signal"] = "residual"
             results.append(prev)
-            if existing_lengths and "residual" in existing_lengths:
-                strategy_lengths["residual"] = existing_lengths["residual"]
+            if existing_lengths and ("residual" in existing_lengths or ("residual", "1") in existing_lengths):
+                l_cand = existing_lengths.get(("residual", "1")) or existing_lengths.get("residual")
+                strategy_lengths["residual"] = l_cand
+                strategy_lengths[("residual", "1")] = l_cand
+            if existing_indices and ("residual" in existing_indices or ("residual", "1") in existing_indices):
+                i_cand = existing_indices.get(("residual", "1")) or existing_indices.get("residual")
+                strategy_indices["residual"] = i_cand
+                strategy_indices[("residual", "1")] = i_cand
 
     def add_signal(sig, strat_key=None):
         if strat_key is None:
@@ -385,8 +410,14 @@ def evaluate_semantic_ids(
                     prev["phase"] = "1"
                     prev["signal"] = strat_key
                     results.append(prev)
-                    if existing_lengths and strat_key in existing_lengths:
-                        strategy_lengths[strat_key] = existing_lengths[strat_key]
+                    if existing_lengths and (strat_key in existing_lengths or (strat_key, "1") in existing_lengths):
+                        l_cand = existing_lengths.get((strat_key, "1")) or existing_lengths.get(strat_key)
+                        strategy_lengths[strat_key] = l_cand
+                        strategy_lengths[(strat_key, "1")] = l_cand
+                    if existing_indices and (strat_key in existing_indices or (strat_key, "1") in existing_indices):
+                        i_cand = existing_indices.get((strat_key, "1")) or existing_indices.get(strat_key)
+                        strategy_indices[strat_key] = i_cand
+                        strategy_indices[(strat_key, "1")] = i_cand
                 return
 
         scores, _ = compute_interaction_signals(
@@ -402,7 +433,12 @@ def evaluate_semantic_ids(
             item_scores=scores,
             item_frequencies=raw_freqs,
         )
-        strategy_lengths[strat_key] = {str(k): v for k, v in lengths.items()}
+        sig_idx = {str(k): list(v) for k, v in truncated.items()}
+        sig_lens = {str(k): v for k, v in lengths.items()}
+        strategy_indices[strat_key] = sig_idx
+        strategy_indices[(strat_key, "1")] = sig_idx
+        strategy_lengths[strat_key] = sig_lens
+        strategy_lengths[(strat_key, "1")] = sig_lens
 
         mean_len = sum(lengths.values()) / len(lengths)
         traffic_w_len = sum(lengths[i] * raw_freqs.get(str(i), 0) for i in truncated) / total_traffic
@@ -496,7 +532,9 @@ def evaluate_semantic_ids(
                     pass
 
             lens_p15 = {str(k): len(v) for k, v in idx_p15.items()}
+            p15_indices = {str(k): list(v) for k, v in idx_p15.items()}
             strategy_lengths[(strat_key, "1.5")] = lens_p15
+            strategy_indices[(strat_key, "1.5")] = p15_indices
 
             mean_len = sum_data.get("mean_length") or (sum(lens_p15.values()) / max(1, len(lens_p15)))
             unique_ids = sum_data.get("unique_ids") if "unique_ids" in sum_data else len({tuple(v) for v in idx_p15.values()})
@@ -546,8 +584,28 @@ def evaluate_semantic_ids(
             prev["strategy"] = strat_key
             prev["phase"] = "1.5"
             results.append(prev)
-            if existing_lengths and (strat_key, "1.5") in existing_lengths:
-                strategy_lengths[(strat_key, "1.5")] = existing_lengths[(strat_key, "1.5")]
+            if existing_lengths and (
+                (strat_key, "1.5") in existing_lengths
+                or f"{strat_key}_phase1.5" in existing_lengths
+                or f"{strat_key}:phase1.5" in existing_lengths
+            ):
+                l_cand = (
+                    existing_lengths.get((strat_key, "1.5"))
+                    or existing_lengths.get(f"{strat_key}_phase1.5")
+                    or existing_lengths.get(f"{strat_key}:phase1.5")
+                )
+                strategy_lengths[(strat_key, "1.5")] = l_cand
+            if existing_indices and (
+                (strat_key, "1.5") in existing_indices
+                or f"{strat_key}_phase1.5" in existing_indices
+                or f"{strat_key}:phase1.5" in existing_indices
+            ):
+                i_cand = (
+                    existing_indices.get((strat_key, "1.5"))
+                    or existing_indices.get(f"{strat_key}_phase1.5")
+                    or existing_indices.get(f"{strat_key}:phase1.5")
+                )
+                strategy_indices[(strat_key, "1.5")] = i_cand
         else:
             results.append({
                 "strategy": strat_key,
@@ -637,23 +695,38 @@ def evaluate_semantic_ids(
     for r in results:
         strat = r["strategy"]
         ph = str(r.get("phase", "1"))
-        l_key = (strat, ph) if (strat, ph) in strategy_lengths else (strat if strat in strategy_lengths else None)
-        if l_key and l_key in strategy_lengths:
+        if (strat, ph) in strategy_lengths:
+            l_key = (strat, ph)
+        elif ph in ("1", "fixed", "-") and strat in strategy_lengths:
+            l_key = strat
+        else:
+            l_key = None
+
+        if l_key is not None:
             if has_phase15 and ph not in ("fixed", "-"):
                 display_label = f"{strat} (P{ph})"
             else:
                 display_label = strat
-            pairwise_items.append((display_label, l_key))
+            if not any(item[0] == display_label for item in pairwise_items):
+                pairwise_items.append((display_label, l_key))
 
     if pairwise and len(pairwise_items) > 1:
         n_items = len(items)
         for d1, k1 in pairwise_items:
             pairwise_match[d1] = {}
             pairwise_mae[d1] = {}
-            l1 = strategy_lengths[k1]
+            l1 = strategy_lengths.get(k1) or {}
+            idx1 = strategy_indices.get(k1)
             for d2, k2 in pairwise_items:
-                l2 = strategy_lengths[k2]
-                exact_matches = sum(l1.get(str(i), 0) == l2.get(str(i), 0) for i in items)
+                l2 = strategy_lengths.get(k2) or {}
+                idx2 = strategy_indices.get(k2)
+                if idx1 is not None and idx2 is not None:
+                    exact_matches = sum(
+                        idx1.get(str(i)) == idx2.get(str(i)) and idx1.get(str(i)) is not None
+                        for i in items
+                    )
+                else:
+                    exact_matches = sum(l1.get(str(i), 0) == l2.get(str(i), 0) for i in items)
                 pairwise_match[d1][d2] = round((exact_matches / n_items) * 100.0, 2)
                 pairwise_mae[d1][d2] = round(
                     sum(abs(l1.get(str(i), 0) - l2.get(str(i), 0)) for i in items) / n_items, 3
@@ -667,6 +740,7 @@ def evaluate_semantic_ids(
         "max_length": max_length,
         "results": results,
         "strategy_lengths": strategy_lengths,
+        "strategy_indices": strategy_indices,
         "pairwise_exact_match_pct": pairwise_match,
         "pairwise_mae_tokens": pairwise_mae,
     }
@@ -751,30 +825,29 @@ def main():
 
     # Pairwise printing
     if pairwise_match:
-        strat_keys = [r["signal"] for r in results]
-        strat_labels = [r["label"] for r in results]
-        col_w = max(14, max(len(l) for l in strat_labels) + 2)
-        row_fmt = f"| {{:<{col_w}}} | " + " | ".join([f"{{:<{col_w}}}" for _ in strat_labels]) + " |"
-        sep_fmt = f"+{'-' * (col_w + 2)}+" + "+".join([f"{'-' * (col_w + 2)}" for _ in strat_labels]) + "+"
+        p_strats = list(pairwise_match.keys())
+        col_w = max(14, max(len(l) for l in p_strats + ["Strategy"]) + 2)
+        row_fmt = f"| {{:<{col_w}}} | " + " | ".join([f"{{:<{col_w}}}" for _ in p_strats]) + " |"
+        sep_fmt = f"+{'-' * (col_w + 2)}+" + "+".join([f"{'-' * (col_w + 2)}" for _ in p_strats]) + "+"
 
         print("\n" + "=" * len(sep_fmt))
         print(" Pairwise Exact Semantic ID Agreement Rate (%)")
         print("=" * len(sep_fmt))
-        print(row_fmt.format("Strategy", *strat_labels))
+        print(row_fmt.format("Strategy", *p_strats))
         print(sep_fmt)
-        for s1, l1 in zip(strat_keys, strat_labels):
-            vals = [f"{pairwise_match[s1][s2]:.2f}%" for s2 in strat_keys]
-            print(row_fmt.format(l1, *vals))
+        for s1 in p_strats:
+            vals = [f"{pairwise_match.get(s1, {}).get(s2, 0.0):.2f}%" for s2 in p_strats]
+            print(row_fmt.format(s1, *vals))
         print(sep_fmt)
 
         print("\n" + "=" * len(sep_fmt))
         print(" Pairwise Mean Absolute Length Difference (Tokens)")
         print("=" * len(sep_fmt))
-        print(row_fmt.format("Strategy", *strat_labels))
+        print(row_fmt.format("Strategy", *p_strats))
         print(sep_fmt)
-        for s1, l1 in zip(strat_keys, strat_labels):
-            vals = [f"{pairwise_mae[s1][s2]:.3f}" for s2 in strat_keys]
-            print(row_fmt.format(l1, *vals))
+        for s1 in p_strats:
+            vals = [f"{pairwise_mae.get(s1, {}).get(s2, 0.0):.3f}" for s2 in p_strats]
+            print(row_fmt.format(s1, *vals))
         print(sep_fmt)
 
     # Output paths: default to LETTER-TIGER/results/<dataset>
@@ -833,10 +906,9 @@ def main():
         md_lines.append("")
 
         if pairwise_match:
-            strat_keys = [r["signal"] for r in results]
-            strat_labels = [r["label"] for r in results]
-            md_header = "| Strategy | " + " | ".join([f"{l}" for l in strat_labels]) + " |"
-            md_sep = "| :--- | " + " | ".join([":---:" for _ in strat_labels]) + " |"
+            p_strats = list(pairwise_match.keys())
+            md_header = "| Strategy | " + " | ".join([f"{s}" for s in p_strats]) + " |"
+            md_sep = "| :--- | " + " | ".join([":---:" for _ in p_strats]) + " |"
 
             md_lines.extend([
                 "## 2. Pairwise Exact Semantic ID Agreement Rate (%)",
@@ -846,9 +918,9 @@ def main():
                 md_header,
                 md_sep,
             ])
-            for s1, l1 in zip(strat_keys, strat_labels):
-                row_vals = [f"{pairwise_match[s1][s2]:.2f}%" for s2 in strat_keys]
-                md_lines.append(f"| **{l1}** | " + " | ".join(row_vals) + " |")
+            for s1 in p_strats:
+                row_vals = [f"{pairwise_match.get(s1, {}).get(s2, 0.0):.2f}%" for s2 in p_strats]
+                md_lines.append(f"| **{s1}** | " + " | ".join(row_vals) + " |")
             md_lines.append("")
 
             md_lines.extend([
@@ -859,9 +931,9 @@ def main():
                 md_header,
                 md_sep,
             ])
-            for s1, l1 in zip(strat_keys, strat_labels):
-                row_vals = [f"{pairwise_mae[s1][s2]:.3f}" for s2 in strat_keys]
-                md_lines.append(f"| **{l1}** | " + " | ".join(row_vals) + " |")
+            for s1 in p_strats:
+                row_vals = [f"{pairwise_mae.get(s1, {}).get(s2, 0.0):.3f}" for s2 in p_strats]
+                md_lines.append(f"| **{s1}** | " + " | ".join(row_vals) + " |")
             md_lines.append("")
 
         out_md.parent.mkdir(parents=True, exist_ok=True)

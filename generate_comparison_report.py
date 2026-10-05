@@ -1472,19 +1472,45 @@ def generate_report_for_max_length(
                 rd_text_sections.append(rd_fmt.format(s, ph, ml_s, "-", "-", "-", "-", "-", "-", f"({v['status']})"))
         rd_text_sections.append(rd_sep)
 
+    # Helper to retrieve Head-to-Head Semantic ID comparison metrics (MAE and exact agreement)
+    sid_indices = sid_eval.get("strategy_indices", {})
+    sid_lengths = sid_eval.get("strategy_lengths", {})
+
+    def get_h2h_sid_metrics(strat_name):
+        d1 = f"{strat_name} (P1)"
+        d15 = f"{strat_name} (P1.5)"
+        if d1 in pairwise_match and d15 in pairwise_match.get(d1, {}):
+            return pairwise_mae.get(d1, {}).get(d15), pairwise_match.get(d1, {}).get(d15)
+        if d15 in pairwise_match and d1 in pairwise_match.get(d15, {}):
+            return pairwise_mae.get(d15, {}).get(d1), pairwise_match.get(d15, {}).get(d1)
+        # Direct fallback from strategy_indices and strategy_lengths if pairwise tables were skipped
+        idx1 = sid_indices.get((strat_name, "1")) or sid_indices.get(strat_name)
+        idx15 = sid_indices.get((strat_name, "1.5"))
+        len1 = sid_lengths.get((strat_name, "1")) or sid_lengths.get(strat_name)
+        len15 = sid_lengths.get((strat_name, "1.5"))
+        if idx1 and idx15:
+            cat_items = list(idx1.keys())
+            if cat_items:
+                exact = sum(idx1.get(str(i)) == idx15.get(str(i)) and idx1.get(str(i)) is not None for i in cat_items)
+                agree = round((exact / len(cat_items)) * 100.0, 2)
+                mae = round(sum(abs(len1.get(str(i), 0) - len15.get(str(i), 0)) for i in cat_items) / len(cat_items), 3) if (len1 and len15) else None
+                return mae, agree
+        return None, None
+
     # Section 4: Head-to-Head Comparison (if applicable)
     head_to_head_text_sections = []
+    h2h_json_data = []
     if common_h2h:
         h2h_strat_w = max(24, max(len(s) for s in common_h2h + ["Strategy"]) + 2)
-        h2h_fmt = f"| {{:<{h2h_strat_w}}} | {{:<9}} | {{:<10}} | {{:<9}} | {{:<10}} | {{:<9}} | {{:<9}} | {{:<10}} | {{:<9}} |"
-        h2h_sep = f"+{'-' * (h2h_strat_w + 2)}+-----------+------------+-----------+------------+-----------+-----------+------------+-----------+"
+        h2h_fmt = f"| {{:<{h2h_strat_w}}} | {{:<9}} | {{:<10}} | {{:<9}} | {{:<11}} | {{:<9}} | {{:<10}} | {{:<9}} | {{:<9}} | {{:<10}} | {{:<9}} |"
+        h2h_sep = f"+{'-' * (h2h_strat_w + 2)}+-----------+------------+-----------+-------------+-----------+------------+-----------+-----------+------------+-----------+"
         head_to_head_text_sections.extend([
             "\n" + "=" * len(h2h_sep),
             " 4. Phase 1 vs. Phase 1.5 Head-to-Head Comparison (Length-Aware Training Impact)",
             " (Direct delta: Phase 1.5 - Phase 1; positive values indicate Phase 1.5 gain)",
             "=" * len(h2h_sep),
             h2h_sep,
-            h2h_fmt.format("Strategy", "P1 MeanL", "P1.5 MeanL", "P1 Hit@10", "P1.5 H@10", "Δ Hit@10", "P1 NDCG@10", "P1.5 N@10", "Δ NDCG@10"),
+            h2h_fmt.format("Strategy", "P1 MeanL", "P1.5 MeanL", "Mean|ΔL|", "SID Agree", "P1 Hit@10", "P1.5 H@10", "Δ Hit@10", "P1 NDCG@10", "P1.5 N@10", "Δ NDCG@10"),
             h2h_sep,
         ])
         for s in common_h2h:
@@ -1494,6 +1520,9 @@ def generate_report_for_max_length(
             m15 = r15.get("metrics", {})
             l1_s = f"{r1['mean_length']:.2f}" if r1['mean_length'] is not None else "-"
             l15_s = f"{r15['mean_length']:.2f}" if r15['mean_length'] is not None else "-"
+            mae_val, agree_val = get_h2h_sid_metrics(s)
+            mae_s = f"{mae_val:.3f}" if mae_val is not None else "-"
+            agree_s = f"{agree_val:.2f}%" if agree_val is not None else "-"
             if r1.get("status") == "completed" and r15.get("status") == "completed":
                 h10_1 = m1.get("hit@10", 0) * 100
                 h10_15 = m15.get("hit@10", 0) * 100
@@ -1506,6 +1535,8 @@ def generate_report_for_max_length(
                         s,
                         l1_s,
                         l15_s,
+                        mae_s,
+                        agree_s,
                         f"{h10_1:.2f}%",
                         f"{h10_15:.2f}%",
                         f"{dh10:+.2f}%",
@@ -1514,10 +1545,38 @@ def generate_report_for_max_length(
                         f"{dn10:+.2f}%",
                     )
                 )
+                h2h_json_data.append({
+                    "strategy": s,
+                    "p1_mean_length": r1["mean_length"],
+                    "p15_mean_length": r15["mean_length"],
+                    "length_mae_tokens": mae_val,
+                    "sid_exact_agreement_pct": agree_val,
+                    "p1_hit10": h10_1,
+                    "p15_hit10": h10_15,
+                    "delta_hit10": dh10,
+                    "p1_ndcg10": n10_1,
+                    "p15_ndcg10": n10_15,
+                    "delta_ndcg10": dn10,
+                    "status": "completed",
+                })
             else:
                 head_to_head_text_sections.append(
-                    h2h_fmt.format(s, l1_s, l15_s, "-", "-", "-", "-", "-", "-")
+                    h2h_fmt.format(s, l1_s, l15_s, mae_s, agree_s, "-", "-", "-", "-", "-", "-")
                 )
+                h2h_json_data.append({
+                    "strategy": s,
+                    "p1_mean_length": r1["mean_length"],
+                    "p15_mean_length": r15["mean_length"],
+                    "length_mae_tokens": mae_val,
+                    "sid_exact_agreement_pct": agree_val,
+                    "p1_hit10": None,
+                    "p15_hit10": None,
+                    "delta_hit10": None,
+                    "p1_ndcg10": None,
+                    "p15_ndcg10": None,
+                    "delta_ndcg10": None,
+                    "status": "pending",
+                })
         head_to_head_text_sections.append(h2h_sep)
 
     # Sections 5 & 6: Pairwise Tables
@@ -1757,10 +1816,10 @@ def generate_report_for_max_length(
             "",
             f"### {md_sec_idx}. Phase 1 vs. Phase 1.5 Head-to-Head Comparison",
             "",
-            "> Direct comparison of Post-Hoc Truncation (Phase 1) vs. Length-Aware Training (Phase 1.5). Positive Δ indicates improvement from length-aware training.",
+            "> Direct comparison of Post-Hoc Truncation (Phase 1) vs. Length-Aware Training (Phase 1.5). Positive Δ indicates improvement from length-aware training. SID Agreement and Mean |ΔL| indicate whether semantic IDs changed or remained identical across phases.",
             "",
-            "| Strategy | P1 Mean Length | P1.5 Mean Length | P1 Hit@10 | P1.5 Hit@10 | Δ Hit@10 | P1 NDCG@10 | P1.5 NDCG@10 | Δ NDCG@10 |",
-            "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
+            "| Strategy | P1 Mean Length | P1.5 Mean Length | Mean |ΔL| | SID Agreement | P1 Hit@10 | P1.5 Hit@10 | Δ Hit@10 | P1 NDCG@10 | P1.5 NDCG@10 | Δ NDCG@10 |",
+            "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
         ])
         for s in common_h2h:
             r1 = p1_by_strat[s]
@@ -1769,6 +1828,9 @@ def generate_report_for_max_length(
             m15 = r15.get("metrics", {})
             l1_s = f"{r1['mean_length']:.2f}" if r1['mean_length'] is not None else "-"
             l15_s = f"{r15['mean_length']:.2f}" if r15['mean_length'] is not None else "-"
+            mae_val, agree_val = get_h2h_sid_metrics(s)
+            mae_s = f"{mae_val:.3f}" if mae_val is not None else "-"
+            agree_s = f"{agree_val:.2f}%" if agree_val is not None else "-"
             if r1.get("status") == "completed" and r15.get("status") == "completed":
                 h10_1 = m1.get("hit@10", 0) * 100
                 h10_15 = m15.get("hit@10", 0) * 100
@@ -1777,10 +1839,10 @@ def generate_report_for_max_length(
                 n10_15 = m15.get("ndcg@10", 0) * 100
                 dn10 = n10_15 - n10_1
                 md_lines.append(
-                    f"| **{s}** | {l1_s} | {l15_s} | {h10_1:.2f}% | {h10_15:.2f}% | **{dh10:+.2f}%** | {n10_1:.2f}% | {n10_15:.2f}% | **{dn10:+.2f}%** |"
+                    f"| **{s}** | {l1_s} | {l15_s} | {mae_s} | {agree_s} | {h10_1:.2f}% | {h10_15:.2f}% | **{dh10:+.2f}%** | {n10_1:.2f}% | {n10_15:.2f}% | **{dn10:+.2f}%** |"
                 )
             else:
-                md_lines.append(f"| **{s}** | {l1_s} | {l15_s} | - | - | - | - | - | - |")
+                md_lines.append(f"| **{s}** | {l1_s} | {l15_s} | {mae_s} | {agree_s} | - | - | - | - | - | - |")
         md_sec_idx += 1
 
     if not args.no_pairwise_sid and len(valid_pairwise_strats) > 1:
@@ -1839,6 +1901,7 @@ def generate_report_for_max_length(
         "pareto_dominant_strategies": rd_data.get("pareto_dominant_strats", []),
         "strategy_comparison": recom_table_data,
         "semantic_id_metrics": sid_table_data,
+        "phase1_vs_phase1_5_comparison": h2h_json_data,
         "pairwise_exact_match_pct": pairwise_match,
         "pairwise_mae_tokens": pairwise_mae,
     }

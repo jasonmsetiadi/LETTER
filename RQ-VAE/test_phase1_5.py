@@ -578,6 +578,8 @@ class TestPhase15Reporting(unittest.TestCase):
                 # Verify markdown contains Phase columns and Head-to-Head section
                 self.assertIn("| Strategy | Phase | Mean Length |", md_text)
                 self.assertIn("Phase 1 vs. Phase 1.5 Head-to-Head Comparison", md_text)
+                self.assertIn("Mean |ΔL|", md_text)
+                self.assertIn("SID Agreement", md_text)
                 self.assertIn("+0.70%", md_text)  # (0.112 - 0.105) * 100 = +0.70% Hit@10 delta!
                 self.assertIn("+0.40%", md_text)  # (0.086 - 0.082) * 100 = +0.40% NDCG@10 delta!
 
@@ -587,6 +589,152 @@ class TestPhase15Reporting(unittest.TestCase):
                 self.assertIn(("fixed", "fixed"), strats)
                 self.assertIn(("residual", "1"), strats)
                 self.assertIn(("residual", "1.5"), strats)
+                self.assertIn("phase1_vs_phase1_5_comparison", data)
+                self.assertEqual(len(data["phase1_vs_phase1_5_comparison"]), 1)
+                self.assertEqual(data["phase1_vs_phase1_5_comparison"][0]["strategy"], "residual")
+            finally:
+                sys.argv = orig_argv
+
+    def test_exact_semantic_id_token_agreement_vs_same_length(self):
+        from compare_semantic_ids import evaluate_semantic_ids
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            dataset = "AgreementTestDS"
+            data_dir = tmp_path / "data" / dataset
+            tok_dir = data_dir / "rqvae"
+            tok_dir.mkdir(parents=True, exist_ok=True)
+
+            # Fixed base index (2 items, length 4)
+            fixed_idx = {"0": [1, 2, 3, 4], "1": [5, 6, 7, 8]}
+            with open(data_dir / f"{dataset}.index.json", "w") as f:
+                json.dump(fixed_idx, f)
+
+            with open(data_dir / f"{dataset}.inter.json", "w") as f:
+                json.dump({"0": [0, 1]}, f)
+
+            # Residuals for Phase 1: both items have high error at L=1 (0.5 > 0.2)
+            # and low error at L=2 (0.05 <= 0.2), so both truncate to length 2:
+            # Item 0 -> [1, 2], Item 1 -> [5, 6]
+            residuals = {"0": [0.5, 0.05, 0.01, 0.0], "1": [0.5, 0.05, 0.01, 0.0]}
+            with open(data_dir / f"{dataset}.residuals.json", "w") as f:
+                json.dump(residuals, f)
+
+            # Phase 1.5 index:
+            # Item 0 has identical tokens [1, 2] (length 2)
+            # Item 1 has different tokens [99, 100] (also length 2!)
+            p15_idx = {"0": [1, 2], "1": [99, 100]}
+            with open(tok_dir / f"{dataset}.index.varlen.res-phase1.5.max4.json", "w") as f:
+                json.dump(p15_idx, f)
+
+            eval_res = evaluate_semantic_ids(
+                dataset=dataset,
+                tokenizer="rqvae",
+                repo_root=tmp_path,
+                data_root=tmp_path / "data",
+                strategies=[("residual", "1"), ("residual", "1.5")],
+                pairwise=True,
+            )
+
+            p_match = eval_res["pairwise_exact_match_pct"]
+            p_mae = eval_res["pairwise_mae_tokens"]
+
+            # Key check: Item 1 has same length (2 == 2) but different tokens ([5, 6] != [99, 100])
+            # So exact agreement must be 1 out of 2 = 50.0%, NOT 100.0%!
+            self.assertIn("residual (P1)", p_match)
+            self.assertIn("residual (P1.5)", p_match["residual (P1)"])
+            self.assertEqual(p_match["residual (P1)"]["residual (P1.5)"], 50.0)
+            self.assertEqual(p_match["residual (P1.5)"]["residual (P1)"], 50.0)
+            self.assertEqual(p_mae["residual (P1)"]["residual (P1.5)"], 0.0)
+
+    def test_head_to_head_sid_metrics_in_comparison_report(self):
+        import importlib.util
+        import tempfile
+        spec = importlib.util.spec_from_file_location(
+            "generate_comparison_report",
+            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            dataset = "H2HTestDS"
+            data_dir = tmp_path / "data" / dataset
+            tok_dir = data_dir / "rqvae"
+            tok_dir.mkdir(parents=True, exist_ok=True)
+            res_dir = tmp_path / "LETTER-TIGER" / "results" / dataset / "rqvae"
+            res_dir.mkdir(parents=True, exist_ok=True)
+
+            # Base index: 2 items
+            with open(data_dir / f"{dataset}.index.json", "w") as f:
+                json.dump({"0": [1, 2, 3, 4], "1": [5, 6, 7, 8]}, f)
+            with open(data_dir / f"{dataset}.inter.json", "w") as f:
+                json.dump({"0": [0, 1]}, f)
+
+            # Phase 1 residual index:
+            # Item 0: err at L=1 is 0.5, at L=2 is 0.05 <= 0.2 -> length 2 ([1, 2])
+            # Item 1: err at L=1 is 0.5, at L=2 is 0.5, at L=3 is 0.05 <= 0.2 -> length 3 ([5, 6, 7])
+            with open(data_dir / f"{dataset}.residuals.json", "w") as f:
+                json.dump({"0": [0.5, 0.05, 0.0, 0.0], "1": [0.5, 0.5, 0.05, 0.0]}, f)
+
+            # Phase 1.5 residual index: Item 0 -> [1, 2] (len 2, identical), Item 1 -> [5, 6] (len 2, changed length & token)
+            p15_idx = {"0": [1, 2], "1": [5, 6]}
+            with open(tok_dir / f"{dataset}.index.varlen.res-phase1.5.max4.json", "w") as f:
+                json.dump(p15_idx, f)
+
+            # Fixed baseline recommendation result
+            with open(res_dir / "fixed_L4.json", "w") as f:
+                json.dump({"mean_results": {"hit@10": 0.10, "ndcg@10": 0.08}}, f)
+
+            # Phase 1 and Phase 1.5 recommendation results
+            with open(res_dir / "varlen-res.json", "w") as f:
+                json.dump({"mean_results": {"hit@10": 0.11, "ndcg@10": 0.085}}, f)
+            with open(res_dir / "varlen-res_phase1.5.json", "w") as f:
+                json.dump({"mean_results": {"hit@10": 0.12, "ndcg@10": 0.092}}, f)
+
+            orig_argv = sys.argv
+            try:
+                sys.argv = [
+                    "generate_comparison_report.py",
+                    "--dataset", dataset,
+                    "--repo-root", str(tmp_path),
+                    "--phase", "both",
+                    "--tokenizer", "rqvae",
+                    "--strategies", "fixed,residual",
+                ]
+                mod.main()
+
+                md_file = res_dir / "strategy_comparison_max4.md"
+                json_file = res_dir / "strategy_comparison_max4.json"
+                self.assertTrue(md_file.exists())
+                self.assertTrue(json_file.exists())
+
+                with open(md_file) as f:
+                    md_text = f.read()
+
+                # Verify Section 4 Head-to-Head table columns & values
+                self.assertIn("| Strategy | P1 Mean Length | P1.5 Mean Length | Mean |ΔL| | SID Agreement | P1 Hit@10 | P1.5 Hit@10 | Δ Hit@10 | P1 NDCG@10 | P1.5 NDCG@10 | Δ NDCG@10 |", md_text)
+                # Item 0 matches [1, 2] == [1, 2], Item 1 [5, 6, 7] != [5, 6] -> exact agreement = 50.00%
+                # Length MAE = (|2 - 2| + |3 - 2|) / 2 = 0.500
+                self.assertIn("50.00%", md_text)
+                self.assertIn("0.500", md_text)
+
+                # Verify pairwise agreement table includes cross-phase pairs
+                self.assertIn("residual (P1)", md_text)
+                self.assertIn("residual (P1.5)", md_text)
+
+                with open(json_file) as f:
+                    data = json.load(f)
+
+                self.assertIn("phase1_vs_phase1_5_comparison", data)
+                h2h = data["phase1_vs_phase1_5_comparison"]
+                self.assertEqual(len(h2h), 1)
+                self.assertEqual(h2h[0]["strategy"], "residual")
+                self.assertEqual(h2h[0]["sid_exact_agreement_pct"], 50.0)
+                self.assertEqual(h2h[0]["length_mae_tokens"], 0.5)
+                self.assertAlmostEqual(h2h[0]["delta_hit10"], (0.12 - 0.11) * 100)
+                self.assertAlmostEqual(h2h[0]["delta_ndcg10"], (0.092 - 0.085) * 100)
             finally:
                 sys.argv = orig_argv
 
