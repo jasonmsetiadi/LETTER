@@ -578,7 +578,7 @@ class TestPhase15Reporting(unittest.TestCase):
                 # Verify markdown contains Phase columns and Head-to-Head section
                 self.assertIn("| Strategy | Phase | Mean Length |", md_text)
                 self.assertIn("Phase 1 vs. Phase 1.5 Head-to-Head Comparison", md_text)
-                self.assertIn("Mean |ΔL|", md_text)
+                self.assertIn(r"Mean \|ΔL\|", md_text)
                 self.assertIn("SID Agreement", md_text)
                 self.assertIn("+0.70%", md_text)  # (0.112 - 0.105) * 100 = +0.70% Hit@10 delta!
                 self.assertIn("+0.40%", md_text)  # (0.086 - 0.082) * 100 = +0.40% NDCG@10 delta!
@@ -714,7 +714,7 @@ class TestPhase15Reporting(unittest.TestCase):
                     md_text = f.read()
 
                 # Verify Section 4 Head-to-Head table columns & values
-                self.assertIn("| Strategy | P1 Mean Length | P1.5 Mean Length | Mean |ΔL| | SID Agreement | P1 Hit@10 | P1.5 Hit@10 | Δ Hit@10 | P1 NDCG@10 | P1.5 NDCG@10 | Δ NDCG@10 |", md_text)
+                self.assertIn(r"| Strategy | P1 Mean Length | P1.5 Mean Length | Mean \|ΔL\| | SID Agreement | P1 Hit@10 | P1.5 Hit@10 | Δ Hit@10 | P1 NDCG@10 | P1.5 NDCG@10 | Δ NDCG@10 |", md_text)
                 # Item 0 matches [1, 2] == [1, 2], Item 1 [5, 6, 7] != [5, 6] -> exact agreement = 50.00%
                 # Length MAE = (|2 - 2| + |3 - 2|) / 2 = 0.500
                 self.assertIn("50.00%", md_text)
