@@ -23,16 +23,11 @@ Pipeline & Mode Options:
   --phase PHASE                Training phase: 1 (fixed-length training, Phase 1) or 1.5 (length-aware item-dependent training, Phase 1.5, default: 1)
   --target-lengths PATH        Target lengths JSON or index file override for Phase 1.5
   --tokenizer-only             Stop after index generation (skip downstream recommenders)
-  --skip-training, --eval-only Skip training downstream models and run evaluation only
-  --retrain-model              Force training downstream models even if checkpoint exists
-  --skip-evaluation            Train recommenders without evaluating
-
+  --resume                     Check and reuse existing checkpoints/indices at each stage (default: false, runs from scratch)
 
 RQ-VAE / Tokenizer Options:
   --embedding-file PATH        Item embedding .npy path
   --cf-embedding PATH          Collaborative-filtering embedding .pt path (required for letter)
-  --rqvae-checkpoint PATH      Reuse an existing RQ-VAE/LETTER checkpoint (autodetected if omitted)
-  --retrain-rqvae              Force training RQ-VAE even if a checkpoint exists
   --rqvae-epochs COUNT         RQ-VAE epochs (default: 10000)
   --rqvae-eval-step COUNT      RQ-VAE validation interval (default: 2000)
   --rqvae-device DEVICE        RQ-VAE device (default: cuda:0)
@@ -42,9 +37,6 @@ RQ-VAE / Tokenizer Options:
   --num-emb-list LIST          Explicit codebook sizes (e.g. "256 256 256 256")
 
 Index Generation & Variable-Length Options:
-  --fixed-index PATH           Intermediate fixed-length index to truncate (autodetected if omitted in varlen)
-  --index-name NAME            Custom index filename or path
-  --overwrite-index            Replace an existing generated index
   --min-length COUNT           Minimum SID length for varlen (default: 1)
   --max-length COUNT           Maximum SID length for varlen (default: 4)
   --strategy NAME              Truncation strategy: shortest_unique, popularity, collaborative, residual (default: shortest_unique)
@@ -100,8 +92,7 @@ MODE_ARG="fixed"
 TOKENIZER_ARG="rqvae"
 EMBEDDING_FILE=""
 CF_EMBEDDING=""
-RQ_CHECKPOINT=""
-RETRAIN_RQVAE=false
+RESUME=false
 RQ_EPOCHS="10000"
 RQ_EVAL_STEP="2000"
 RQ_DEVICE="cuda:0"
@@ -118,7 +109,6 @@ CF_EMB_FILE=""
 RESIDUALS_FILE=""
 RESIDUAL_THRESHOLD="0.2"
 FIXED_INDEX_PARAM=""
-INDEX_NAME=""
 MODELS="tiger"
 BASE_MODEL="${BASE_MODEL:-huggyllama/llama-7b}"
 PHASE="1"
@@ -126,10 +116,6 @@ TARGET_LENGTHS=""
 TIGER_GPUS=""
 LCREC_GPUS=""
 RESULTS_FILE=""
-SKIP_TRAINING=false
-RETRAIN_MODEL=false
-SKIP_EVALUATION=false
-OVERWRITE_INDEX=false
 TOKENIZER_ONLY=false
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
@@ -141,8 +127,7 @@ while [[ $# -gt 0 ]]; do
     --data-root) DATA_ROOT="$2"; shift 2 ;;
     --embedding-file) EMBEDDING_FILE="$2"; shift 2 ;;
     --cf-embedding) CF_EMBEDDING="$2"; shift 2 ;;
-    --rqvae-checkpoint) RQ_CHECKPOINT="$2"; shift 2 ;;
-    --retrain-rqvae) RETRAIN_RQVAE=true; shift ;;
+    --resume) RESUME=true; shift ;;
     --rqvae-epochs) RQ_EPOCHS="$2"; shift 2 ;;
     --rqvae-eval-step) RQ_EVAL_STEP="$2"; shift 2 ;;
     --rqvae-device) RQ_DEVICE="$2"; shift 2 ;;
@@ -158,8 +143,6 @@ while [[ $# -gt 0 ]]; do
     --cf-emb-file) CF_EMB_FILE="$2"; shift 2 ;;
     --residuals-file) RESIDUALS_FILE="$2"; shift 2 ;;
     --residual-threshold) RESIDUAL_THRESHOLD="$2"; shift 2 ;;
-    --fixed-index) FIXED_INDEX_PARAM="$2"; shift 2 ;;
-    --index-name) INDEX_NAME="$2"; shift 2 ;;
     --phase|--training-phase) PHASE="$2"; shift 2 ;;
     --target-lengths|--target_lengths) TARGET_LENGTHS="$2"; shift 2 ;;
     --models) MODELS="$2"; shift 2 ;;
@@ -167,10 +150,6 @@ while [[ $# -gt 0 ]]; do
     --tiger-gpus) TIGER_GPUS="$2"; shift 2 ;;
     --lcrec-gpus) LCREC_GPUS="$2"; shift 2 ;;
     --results-file) RESULTS_FILE="$2"; shift 2 ;;
-    --skip-training|--eval-only) SKIP_TRAINING=true; shift ;;
-    --retrain-model) RETRAIN_MODEL=true; shift ;;
-    --skip-evaluation) SKIP_EVALUATION=true; shift ;;
-    --overwrite-index) OVERWRITE_INDEX=true; shift ;;
     --tokenizer-only) TOKENIZER_ONLY=true; shift ;;
     --python) PYTHON_BIN="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -192,9 +171,6 @@ if [[ -n "$EMBEDDING_FILE" && "$EMBEDDING_FILE" != /* ]]; then
 fi
 if [[ -n "$CF_EMBEDDING" && "$CF_EMBEDDING" != /* ]]; then
   CF_EMBEDDING="$CALLER_DIR/$CF_EMBEDDING"
-fi
-if [[ -n "$RQ_CHECKPOINT" && "$RQ_CHECKPOINT" != /* ]]; then
-  RQ_CHECKPOINT="$CALLER_DIR/$RQ_CHECKPOINT"
 fi
 if [[ -n "$BASE_MODEL" && -d "$CALLER_DIR/$BASE_MODEL" ]]; then
   BASE_MODEL="$CALLER_DIR/$BASE_MODEL"
@@ -323,7 +299,7 @@ if [[ "$MODE" == "varlen" ]]; then
           printf '[Phase 1.5] Autodetected reference fixed index for shortest_unique: %s\n' "$FIXED_INDEX_PARAM"
         else
           printf '[Phase 1.5] Strategy "shortest_unique" requires a reference fixed-length index to determine prefix uniqueness.\n' >&2
-          printf 'Please provide --fixed-index <path> or --target-lengths <path>, or run Phase 1 first.\n' >&2
+          printf 'Please provide --target-lengths <path>, or run Phase 1 first.\n' >&2
           exit 1
         fi
       fi
@@ -511,39 +487,20 @@ fi
 
 TOK_INDEX_DIR="$DATA_ROOT/$DATASET/$TOK_NAME"
 
-CUR_RQ_CHECKPOINT="$RQ_CHECKPOINT"
+CUR_RQ_CHECKPOINT=""
 
 ensure_tokenizer_checkpoint() {
   if [[ -n "$CUR_RQ_CHECKPOINT" && -f "$CUR_RQ_CHECKPOINT" ]]; then
     return 0
   fi
 
-  if [[ -n "$RQ_CHECKPOINT" && -f "$RQ_CHECKPOINT" ]]; then
-    CHECK_LAYERS=$("$PYTHON_BIN" -c '
-import sys, torch
-try:
-    ckpt = torch.load(sys.argv[1], map_location="cpu", weights_only=False)
-except TypeError:
-    ckpt = torch.load(sys.argv[1], map_location="cpu")
-args = ckpt.get("args")
-if args and hasattr(args, "num_emb_list"):
-    print(len(args.num_emb_list))
-' "$RQ_CHECKPOINT" 2>/dev/null || true)
-    if [[ "$CHECK_LAYERS" =~ ^[0-9]+$ && "$CHECK_LAYERS" -lt "$NUM_LAYERS" ]]; then
-      printf "Specified RQ-VAE checkpoint has %s layers, fewer than requested %s.\n" "$CHECK_LAYERS" "$NUM_LAYERS" >&2
-      exit 1
-    fi
-    CUR_RQ_CHECKPOINT="$RQ_CHECKPOINT"
-    return 0
-  fi
-
   local detected_ckpt=""
-  if [[ "$RETRAIN_RQVAE" != true ]]; then
+  if [[ "$RESUME" == true ]]; then
     detected_ckpt="$(find_latest_checkpoint "$TOK_CKPT_ROOT" "$NUM_LAYERS" "$PHASE")"
     if [[ -n "$detected_ckpt" && -f "$detected_ckpt" ]]; then
       CUR_RQ_CHECKPOINT="$detected_ckpt"
-      printf '\n[RQ-VAE] [%s] Autodetected existing %s-layer (Phase %s) checkpoint: %s\n' "$TOK_LABEL" "$NUM_LAYERS" "$PHASE" "$CUR_RQ_CHECKPOINT"
-      printf '[RQ-VAE] Reusing existing checkpoint (pass --retrain-rqvae to force training).\n'
+      printf '\n[RQ-VAE] [%s] Found existing %s-layer (Phase %s) checkpoint: %s\n' "$TOK_LABEL" "$NUM_LAYERS" "$PHASE" "$CUR_RQ_CHECKPOINT"
+      printf '[RQ-VAE] Reusing existing checkpoint.\n'
       return 0
     fi
   fi
@@ -684,23 +641,12 @@ TARGET_INDEX_ARG=""
 if [[ "$MODE" == "fixed" ]]; then
   # --- Fixed-Length Mode ---
   DEF_NAME="$DATASET.index.fixed.L${NUM_LAYERS}.json"
+  TARGET_INDEX_FILE="$TOK_INDEX_DIR/$DEF_NAME"
+  TARGET_INDEX_ARG="$TOK_NAME/$DEF_NAME"
 
-  if [[ -n "$INDEX_NAME" ]]; then
-    if [[ "$INDEX_NAME" == /* ]]; then
-      TARGET_INDEX_FILE="$INDEX_NAME"
-      TARGET_INDEX_ARG="$INDEX_NAME"
-    else
-      TARGET_INDEX_FILE="$TOK_INDEX_DIR/$INDEX_NAME"
-      TARGET_INDEX_ARG="$TOK_NAME/$INDEX_NAME"
-    fi
-  else
-    TARGET_INDEX_FILE="$TOK_INDEX_DIR/$DEF_NAME"
-    TARGET_INDEX_ARG="$TOK_NAME/$DEF_NAME"
-  fi
-
-  if [[ -f "$TARGET_INDEX_FILE" && "$OVERWRITE_INDEX" != true && "$RETRAIN_RQVAE" != true ]]; then
+  if [[ "$RESUME" == true && -f "$TARGET_INDEX_FILE" ]]; then
     printf '\n[Index] [%s] [Fixed] Found existing index: %s\n' "$TOK_LABEL" "$TARGET_INDEX_FILE"
-    printf '[Index] Reusing existing index (pass --overwrite-index to regenerate).\n'
+    printf '[Index] Reusing existing index.\n'
   else
     generate_fixed_index_file "$TARGET_INDEX_FILE"
   fi
@@ -725,64 +671,41 @@ else
     DEF_VAR_NAME="$DATASET.index.varlen${STRAT_SUFFIX}${VAR_TAG}.json"
   fi
 
-  if [[ -n "$INDEX_NAME" ]]; then
-    if [[ "$INDEX_NAME" == /* ]]; then
-      TARGET_INDEX_FILE="$INDEX_NAME"
-      TARGET_INDEX_ARG="$INDEX_NAME"
-    else
-      TARGET_INDEX_FILE="$TOK_INDEX_DIR/$INDEX_NAME"
-      TARGET_INDEX_ARG="$TOK_NAME/$INDEX_NAME"
-    fi
-  else
-    TARGET_INDEX_FILE="$TOK_INDEX_DIR/$DEF_VAR_NAME"
-    TARGET_INDEX_ARG="$TOK_NAME/$DEF_VAR_NAME"
-  fi
+  TARGET_INDEX_FILE="$TOK_INDEX_DIR/$DEF_VAR_NAME"
+  TARGET_INDEX_ARG="$TOK_NAME/$DEF_VAR_NAME"
 
   if [[ "$PHASE" == "1.5" ]]; then
     # Phase 1.5: Direct length-aware generation
-    if [[ -f "$TARGET_INDEX_FILE" && "$OVERWRITE_INDEX" != true && "$RETRAIN_RQVAE" != true ]]; then
+    if [[ "$RESUME" == true && -f "$TARGET_INDEX_FILE" ]]; then
       printf '\n[Variable index] [%s] [Phase 1.5] Found existing index: %s\n' "$TOK_LABEL" "$TARGET_INDEX_FILE"
-      printf '[Variable index] Reusing existing index (pass --overwrite-index to regenerate).\n'
+      printf '[Variable index] Reusing existing index.\n'
     else
       generate_varlen_index_phase1_5 "$TARGET_INDEX_FILE"
     fi
   else
     # Phase 1: Post-hoc truncation from intermediate fixed index
-    INTERMEDIATE_FIXED_FILE=""
-    REGEN_INTERMEDIATE=false
-
-    if [[ -n "$FIXED_INDEX_PARAM" ]]; then
-      if [[ "$FIXED_INDEX_PARAM" == /* ]]; then
-        INTERMEDIATE_FIXED_FILE="$FIXED_INDEX_PARAM"
-      elif [[ -f "$CALLER_DIR/$FIXED_INDEX_PARAM" ]]; then
-        INTERMEDIATE_FIXED_FILE="$CALLER_DIR/$FIXED_INDEX_PARAM"
-      elif [[ -f "$TOK_INDEX_DIR/$FIXED_INDEX_PARAM" ]]; then
-        INTERMEDIATE_FIXED_FILE="$TOK_INDEX_DIR/$FIXED_INDEX_PARAM"
-      else
-        INTERMEDIATE_FIXED_FILE="$TOK_INDEX_DIR/$FIXED_INDEX_PARAM"
-      fi
-      if [[ ! -f "$INTERMEDIATE_FIXED_FILE" ]]; then
-        printf 'Specified --fixed-index not found: %s\n' "$INTERMEDIATE_FIXED_FILE" >&2
-        exit 1
-      fi
+    if [[ "$RESUME" == true && -f "$TARGET_INDEX_FILE" ]]; then
+      printf '\n[Variable index] [%s] Found existing variable-length index: %s\n' "$TOK_LABEL" "$TARGET_INDEX_FILE"
+      printf '[Variable index] Reusing existing index.\n'
     else
-      # Autodetect intermediate index in tokenizer directory
-      cand1="$TOK_INDEX_DIR/$DATASET.index.fixed.L${NUM_LAYERS}.json"
-      cand2="$TOK_INDEX_DIR/$DATASET.index.fixed-for-varlen.L${NUM_LAYERS}.json"
+      INTERMEDIATE_FIXED_FILE="$TOK_INDEX_DIR/$DATASET.index.fixed-for-varlen.L${NUM_LAYERS}.json"
+      reuse_intermediate=false
+      if [[ "$RESUME" == true ]]; then
+        cand1="$TOK_INDEX_DIR/$DATASET.index.fixed.L${NUM_LAYERS}.json"
+        cand2="$TOK_INDEX_DIR/$DATASET.index.fixed-for-varlen.L${NUM_LAYERS}.json"
 
-      if [[ -f "$cand1" ]]; then
-        INTERMEDIATE_FIXED_FILE="$cand1"
-      elif [[ -f "$cand2" ]]; then
-        INTERMEDIATE_FIXED_FILE="$cand2"
-      else
-        INTERMEDIATE_FIXED_FILE="$cand2"
-        REGEN_INTERMEDIATE=true
+        if [[ -f "$cand1" ]]; then
+          INTERMEDIATE_FIXED_FILE="$cand1"
+          reuse_intermediate=true
+        elif [[ -f "$cand2" ]]; then
+          INTERMEDIATE_FIXED_FILE="$cand2"
+          reuse_intermediate=true
+        fi
       fi
-    fi
 
-    # Check length of existing intermediate index
-    if [[ -f "$INTERMEDIATE_FIXED_FILE" && "$REGEN_INTERMEDIATE" != true ]]; then
-      CHECK_TOKENS=$("$PYTHON_BIN" -c '
+      # Check length of existing intermediate index if attempting reuse
+      if [[ "$reuse_intermediate" == true && -f "$INTERMEDIATE_FIXED_FILE" ]]; then
+        CHECK_TOKENS=$("$PYTHON_BIN" -c '
 import sys, json
 try:
     with open(sys.argv[1]) as f:
@@ -795,32 +718,21 @@ except Exception:
     print("-1")
 ' "$INTERMEDIATE_FIXED_FILE" 2>/dev/null || echo "-1")
 
-      if [[ "$CHECK_TOKENS" =~ ^[0-9]+$ && "$CHECK_TOKENS" -lt "$MAX_LENGTH" ]]; then
-        if [[ -n "$FIXED_INDEX_PARAM" ]]; then
-          printf 'Specified --fixed-index (%s) has %s tokens, fewer than --max-length (%s).\n' \
-            "$INTERMEDIATE_FIXED_FILE" "$CHECK_TOKENS" "$MAX_LENGTH" >&2
-          exit 1
-        else
+        if [[ "$CHECK_TOKENS" =~ ^[0-9]+$ && "$CHECK_TOKENS" -lt "$MAX_LENGTH" ]]; then
           printf '\n[Fixed index] Warning: %s has %s tokens, fewer than --max-length (%s).\n' \
             "$INTERMEDIATE_FIXED_FILE" "$CHECK_TOKENS" "$MAX_LENGTH"
-          printf '[Fixed index] Will generate an intermediate fixed index with %s layers.\n' "$NUM_LAYERS"
           INTERMEDIATE_FIXED_FILE="$TOK_INDEX_DIR/$DATASET.index.fixed-for-varlen.L${NUM_LAYERS}.json"
-          REGEN_INTERMEDIATE=true
+          reuse_intermediate=false
         fi
       fi
-    fi
 
-    if [[ ! -f "$INTERMEDIATE_FIXED_FILE" || "$OVERWRITE_INDEX" == true || "$RETRAIN_RQVAE" == true || "$REGEN_INTERMEDIATE" == true ]]; then
-      generate_fixed_index_file "$INTERMEDIATE_FIXED_FILE"
-    else
-      printf '\n[Fixed index] [%s] Reusing intermediate fixed index: %s\n' "$TOK_LABEL" "$INTERMEDIATE_FIXED_FILE"
-    fi
+      if [[ "$reuse_intermediate" == true && -f "$INTERMEDIATE_FIXED_FILE" ]]; then
+        printf '\n[Fixed index] [%s] Reusing intermediate fixed index: %s\n' "$TOK_LABEL" "$INTERMEDIATE_FIXED_FILE"
+      else
+        generate_fixed_index_file "$INTERMEDIATE_FIXED_FILE"
+      fi
 
-    # Generate variable index via truncation if needed
-    if [[ -f "$TARGET_INDEX_FILE" && "$OVERWRITE_INDEX" != true ]]; then
-      printf '\n[Variable index] [%s] Found existing variable-length index: %s\n' "$TOK_LABEL" "$TARGET_INDEX_FILE"
-      printf '[Variable index] Reusing existing index (pass --overwrite-index to regenerate).\n'
-    else
+      # Generate variable index via truncation
       printf '\n[Variable index] [%s] Creating variable-length index (%s)...\n' "$TOK_LABEL" "$STRATEGY"
       STEP_START="$SECONDS"
       mkdir -p "$(dirname "$TARGET_INDEX_FILE")"
@@ -918,11 +830,9 @@ if contains_model tiger; then
     tiger_trained=true
   fi
 
-  if [[ "$tiger_trained" == true && "$RETRAIN_MODEL" != true ]]; then
+  if [[ "$RESUME" == true && "$tiger_trained" == true ]]; then
     printf '\n[TIGER] [%s] [%s] Found existing trained model: %s\n' "$TOK_LABEL" "$MODE" "$CUR_TIGER_CKPT"
-    printf '[TIGER] Skipping training and resuming straight to evaluation (pass --retrain-model to retrain).\n'
-  elif [[ "$SKIP_TRAINING" == true ]]; then
-    printf '\n[TIGER] [%s] [%s] Skipping training (--skip-training specified).\n' "$TOK_LABEL" "$MODE"
+    printf '[TIGER] Skipping training and resuming straight to evaluation.\n'
   else
     printf '\n[TIGER] [%s] [%s] Training...\n' "$TOK_LABEL" "$MODE"
     STEP_START="$SECONDS"
@@ -963,28 +873,26 @@ if contains_model tiger; then
     printf 'Stored LETTER-TIGER checkpoint: %s\n' "$CUR_TIGER_CKPT"
   fi
 
-  if [[ "$SKIP_EVALUATION" != true ]]; then
-    printf '\n[TIGER] [%s] [%s] Evaluating...\n' "$TOK_LABEL" "$MODE"
-    STEP_START="$SECONDS"
-    (
-      cd "$REPO_ROOT/LETTER-TIGER"
-      mkdir -p "$(dirname "$CUR_TIGER_RESULTS")"
-      "$PYTHON_BIN" test.py \
-        --gpu_id 0 \
-        --ckpt_path "$CUR_TIGER_CKPT" \
-        --dataset "$DATASET" \
-        --data_path "$DATA_ROOT" \
-        --results_file "$CUR_TIGER_RESULTS" \
-        --test_batch_size 32 \
-        --num_beams 20 \
-        --test_prompt_ids 0 \
-        --index_file "$TARGET_INDEX_ARG"
-    )
-    printf 'Completed [%s] [%s] LETTER-TIGER evaluation in %s.\n' \
-      "$TOK_LABEL" "$MODE" "$(format_duration "$((SECONDS - STEP_START))")"
-    record_phase "[$TOK_LABEL] [$MODE] LETTER-TIGER evaluation" "$((SECONDS - STEP_START))"
-    printf 'Stored LETTER-TIGER metrics: %s\n' "$CUR_TIGER_RESULTS"
-  fi
+  printf '\n[TIGER] [%s] [%s] Evaluating...\n' "$TOK_LABEL" "$MODE"
+  STEP_START="$SECONDS"
+  (
+    cd "$REPO_ROOT/LETTER-TIGER"
+    mkdir -p "$(dirname "$CUR_TIGER_RESULTS")"
+    "$PYTHON_BIN" test.py \
+      --gpu_id 0 \
+      --ckpt_path "$CUR_TIGER_CKPT" \
+      --dataset "$DATASET" \
+      --data_path "$DATA_ROOT" \
+      --results_file "$CUR_TIGER_RESULTS" \
+      --test_batch_size 32 \
+      --num_beams 20 \
+      --test_prompt_ids 0 \
+      --index_file "$TARGET_INDEX_ARG"
+  )
+  printf 'Completed [%s] [%s] LETTER-TIGER evaluation in %s.\n' \
+    "$TOK_LABEL" "$MODE" "$(format_duration "$((SECONDS - STEP_START))")"
+  record_phase "[$TOK_LABEL] [$MODE] LETTER-TIGER evaluation" "$((SECONDS - STEP_START))"
+  printf 'Stored LETTER-TIGER metrics: %s\n' "$CUR_TIGER_RESULTS"
 fi
 
 if contains_model lcrec; then
@@ -997,11 +905,9 @@ if contains_model lcrec; then
     lcrec_trained=true
   fi
 
-  if [[ "$lcrec_trained" == true && "$RETRAIN_MODEL" != true ]]; then
+  if [[ "$RESUME" == true && "$lcrec_trained" == true ]]; then
     printf '\n[LC-Rec] [%s] [%s] Found existing trained model: %s\n' "$TOK_LABEL" "$MODE" "$CUR_LCREC_CKPT"
-    printf '[LC-Rec] Skipping training and resuming straight to evaluation (pass --retrain-model to retrain).\n'
-  elif [[ "$SKIP_TRAINING" == true ]]; then
-    printf '\n[LC-Rec] [%s] [%s] Skipping training (--skip-training specified).\n' "$TOK_LABEL" "$MODE"
+    printf '[LC-Rec] Skipping training and resuming straight to evaluation.\n'
   else
     printf '\n[LC-Rec] [%s] [%s] Training...\n' "$TOK_LABEL" "$MODE"
     STEP_START="$SECONDS"
@@ -1052,32 +958,30 @@ if contains_model lcrec; then
     printf 'Stored LETTER-LC-Rec checkpoint: %s\n' "$CUR_LCREC_CKPT"
   fi
 
-  if [[ "$SKIP_EVALUATION" != true ]]; then
-    printf '\n[LC-Rec] [%s] [%s] Evaluating...\n' "$TOK_LABEL" "$MODE"
-    STEP_START="$SECONDS"
-    (
-      cd "$REPO_ROOT/LETTER-LC-Rec"
-      mkdir -p "$(dirname "$CUR_LCREC_RESULTS")"
-      TEST_PORT="$(find_free_port 4324)"
-      CUDA_VISIBLE_DEVICES="$LCREC_GPUS" torchrun \
-        --nproc_per_node="$(gpu_count "$LCREC_GPUS")" \
-        --master_port="$TEST_PORT" \
-        test_ddp.py \
-        --ckpt_path "$CUR_LCREC_CKPT" \
-        --base_model "$BASE_MODEL" \
-        --dataset "$DATASET" \
-        --data_path "$DATA_ROOT" \
-        --results_file "$CUR_LCREC_RESULTS" \
-        --test_batch_size 1 \
-        --num_beams 20 \
-        --test_prompt_ids 0 \
-        --index_file "$TARGET_INDEX_ARG"
-    )
-    printf 'Completed [%s] [%s] LETTER-LC-Rec evaluation in %s.\n' \
-      "$TOK_LABEL" "$MODE" "$(format_duration "$((SECONDS - STEP_START))")"
-    record_phase "[$TOK_LABEL] [$MODE] LETTER-LC-Rec evaluation" "$((SECONDS - STEP_START))"
-    printf 'Stored LETTER-LC-Rec metrics: %s\n' "$CUR_LCREC_RESULTS"
-  fi
+  printf '\n[LC-Rec] [%s] [%s] Evaluating...\n' "$TOK_LABEL" "$MODE"
+  STEP_START="$SECONDS"
+  (
+    cd "$REPO_ROOT/LETTER-LC-Rec"
+    mkdir -p "$(dirname "$CUR_LCREC_RESULTS")"
+    TEST_PORT="$(find_free_port 4324)"
+    CUDA_VISIBLE_DEVICES="$LCREC_GPUS" torchrun \
+      --nproc_per_node="$(gpu_count "$LCREC_GPUS")" \
+      --master_port="$TEST_PORT" \
+      test_ddp.py \
+      --ckpt_path "$CUR_LCREC_CKPT" \
+      --base_model "$BASE_MODEL" \
+      --dataset "$DATASET" \
+      --data_path "$DATA_ROOT" \
+      --results_file "$CUR_LCREC_RESULTS" \
+      --test_batch_size 1 \
+      --num_beams 20 \
+      --test_prompt_ids 0 \
+      --index_file "$TARGET_INDEX_ARG"
+  )
+  printf 'Completed [%s] [%s] LETTER-LC-Rec evaluation in %s.\n' \
+    "$TOK_LABEL" "$MODE" "$(format_duration "$((SECONDS - STEP_START))")"
+  record_phase "[$TOK_LABEL] [$MODE] LETTER-LC-Rec evaluation" "$((SECONDS - STEP_START))"
+  printf 'Stored LETTER-LC-Rec metrics: %s\n' "$CUR_LCREC_RESULTS"
 fi
 
 print_phase_durations

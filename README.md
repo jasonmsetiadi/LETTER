@@ -127,7 +127,7 @@ fixed index using collision-free prefix pruning:
 - `--min-length` / `--max-length`: ID length bounds (defaults: 1 and 4).
 - `--collab-signal`: `frequency` (default), `user_entropy`, `pagerank`, `co_occurrence`, or `cf_density`.
 
-Use `--rqvae-checkpoint PATH` to skip RQ-VAE training, `--tokenizer-only` to stop after index generation, and `--skip-evaluation` to omit the test stage. Existing generated indexes are protected unless `--overwrite-index` is supplied.
+By default, `run_pipeline.sh` runs all stages from scratch. Use `--resume` to check and reuse existing checkpoints/indices at each stage, and `--tokenizer-only` to stop after index generation.
 
 ### LETTER-TIGER
 
