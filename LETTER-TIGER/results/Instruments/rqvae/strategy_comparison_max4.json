@@ -818,9 +818,9 @@
     {
       "strategy": "residual",
       "phase": "1",
-      "mean_length": 3.912416851441242,
-      "weighted_length": 3.899099212720649,
-      "token_savings_pct": 2.5225196819837703,
+      "mean_length": 3.0131021971376737,
+      "weighted_length": 3.9948436355522357,
+      "token_savings_pct": 0.12890911119410875,
       "status": "completed",
       "metrics": {
         "hit@1": 0.0611577587598902,
@@ -846,18 +846,18 @@
         "ndcg@10": 0.07745328077606355
       },
       "interp_metrics": {
-        "hit@1": 0.05849021568948276,
-        "hit@5": 0.08332723932284608,
-        "hit@10": 0.10383603116743995,
-        "ndcg@5": 0.07090171398918022,
-        "ndcg@10": 0.0774980110124848
+        "hit@1": 0.05887140428427476,
+        "hit@5": 0.08381733894472151,
+        "hit@10": 0.10434428262716261,
+        "ndcg@5": 0.07135469480759499,
+        "ndcg@10": 0.07795730663916689
       },
       "delta_interp": {
-        "hit@1": 4.560665470219995,
-        "hit@5": 3.1885568044341985,
-        "hit@10": 2.790339236979719,
-        "ndcg@5": 3.841074240946289,
-        "ndcg@10": 3.5536300328120904
+        "hit@1": 3.883641817978771,
+        "hit@5": 2.5851891324411973,
+        "hit@10": 2.289656893422326,
+        "ndcg@5": 3.1818602267658767,
+        "ndcg@10": 2.9435303327125184
       },
       "delta_lmax": {
         "hit@1": 4.627071823204426,
@@ -1228,10 +1228,10 @@
     {
       "strategy": "residual",
       "phase": "1",
-      "mean_length": 3.912416851441242,
-      "weighted_length": 3.899099212720649,
-      "token_savings_pct": 2.5225196819837703,
-      "collisions": 242,
+      "mean_length": 3.0131021971376737,
+      "weighted_length": 3.9948436355522357,
+      "token_savings_pct": 0.12890911119410875,
+      "collisions": 25,
       "metrics": {
         "hit@1": 0.0611577587598902,
         "hit@5": 0.08598417568222186,
@@ -1515,18 +1515,18 @@
     {
       "strategy": "residual",
       "phase": "1",
-      "label": "residual (Phase 1.5)",
-      "basis": "Length-Aware Training (Phase 1.5):",
-      "mean_length": 3.912416851441242,
-      "traffic_weighted_length": 3.899099212720649,
-      "token_savings_pct": 2.5225196819837703,
+      "label": "Residual (Thresh=0.2)",
+      "basis": "Shortest prefix with cumulative reconstruction error <= 0.2",
+      "mean_length": 3.0131021971376737,
+      "traffic_weighted_length": 3.9948436355522357,
+      "token_savings_pct": 0.12890911119410875,
       "length_distribution": {
-        "1": 12,
-        "2": 82,
-        "3": 669,
-        "4": 9159
+        "1": 2,
+        "2": 587,
+        "3": 8612,
+        "4": 721
       },
-      "collisions": 242,
+      "collisions": 25,
       "spearman_rho_vs_frequency": null
     },
     {
@@ -1620,10 +1620,10 @@
     },
     {
       "strategy": "residual",
-      "p1_mean_length": 3.912416851441242,
+      "p1_mean_length": 3.0131021971376737,
       "p15_mean_length": 3.912416851441242,
-      "length_mae_tokens": null,
-      "sid_exact_agreement_pct": null,
+      "length_mae_tokens": 0.089,
+      "sid_exact_agreement_pct": 0.0,
       "p1_hit10": 10.673340868722752,
       "p15_hit10": 10.463426449216858,
       "delta_hit10": -0.2099144195058944,
@@ -1651,6 +1651,7 @@
       "popularity:co_occurrence (P1.5)": 0.0,
       "popularity:cf_density (P1)": 0.0,
       "popularity:cf_density (P1.5)": 0.0,
+      "residual (P1)": 0.0,
       "residual (P1.5)": 0.0
     },
     "fixed": {
@@ -1670,6 +1671,7 @@
       "popularity:co_occurrence (P1.5)": 0.0,
       "popularity:cf_density (P1)": 35.44,
       "popularity:cf_density (P1.5)": 0.0,
+      "residual (P1)": 0.0,
       "residual (P1.5)": 0.0
     },
     "fixed_L6": {
@@ -1689,6 +1691,7 @@
       "popularity:co_occurrence (P1.5)": 0.0,
       "popularity:cf_density (P1)": 0.0,
       "popularity:cf_density (P1.5)": 0.0,
+      "residual (P1)": 0.0,
       "residual (P1.5)": 0.0
     },
     "fixed_L8": {
@@ -1708,6 +1711,7 @@
       "popularity:co_occurrence (P1.5)": 0.0,
       "popularity:cf_density (P1)": 0.0,
       "popularity:cf_density (P1.5)": 0.0,
+      "residual (P1)": 0.0,
       "residual (P1.5)": 0.0
     },
     "fixed_L10": {
@@ -1727,6 +1731,7 @@
       "popularity:co_occurrence (P1.5)": 0.0,
       "popularity:cf_density (P1)": 0.0,
       "popularity:cf_density (P1.5)": 0.0,
+      "residual (P1)": 0.0,
       "residual (P1.5)": 0.0
     },
     "shortest_unique (P1)": {
@@ -1746,6 +1751,7 @@
       "popularity:co_occurrence (P1.5)": 0.0,
       "popularity:cf_density (P1)": 57.68,
       "popularity:cf_density (P1.5)": 0.01,
+      "residual (P1)": 0.0,
       "residual (P1.5)": 0.0
     },
     "popularity:frequency (P1)": {
@@ -1765,6 +1771,7 @@
       "popularity:co_occurrence (P1.5)": 0.0,
       "popularity:cf_density (P1)": 48.36,
       "popularity:cf_density (P1.5)": 0.0,
+      "residual (P1)": 0.0,
       "residual (P1.5)": 0.0
     },
     "popularity:frequency (P1.5)": {
@@ -1784,6 +1791,7 @@
       "popularity:co_occurrence (P1.5)": 0.02,
       "popularity:cf_density (P1)": 0.0,
       "popularity:cf_density (P1.5)": 0.0,
+      "residual (P1)": 0.0,
       "residual (P1.5)": 0.0
     },
     "popularity:user_entropy (P1)": {
@@ -1803,6 +1811,7 @@
       "popularity:co_occurrence (P1.5)": 0.0,
       "popularity:cf_density (P1)": 58.42,
       "popularity:cf_density (P1.5)": 0.01,
+      "residual (P1)": 0.0,
       "residual (P1.5)": 0.0
     },
     "popularity:user_entropy (P1.5)": {
@@ -1822,6 +1831,7 @@
       "popularity:co_occurrence (P1.5)": 0.01,
       "popularity:cf_density (P1)": 0.0,
       "popularity:cf_density (P1.5)": 0.09,
+      "residual (P1)": 0.0,
       "residual (P1.5)": 0.0
     },
     "popularity:pagerank (P1)": {
@@ -1841,6 +1851,7 @@
       "popularity:co_occurrence (P1.5)": 0.0,
       "popularity:cf_density (P1)": 50.5,
       "popularity:cf_density (P1.5)": 0.0,
+      "residual (P1)": 0.0,
       "residual (P1.5)": 0.0
     },
     "popularity:pagerank (P1.5)": {
@@ -1860,6 +1871,7 @@
       "popularity:co_occurrence (P1.5)": 0.01,
       "popularity:cf_density (P1)": 0.0,
       "popularity:cf_density (P1.5)": 0.0,
+      "residual (P1)": 0.0,
       "residual (P1.5)": 0.0
     },
     "popularity:co_occurrence (P1)": {
@@ -1879,6 +1891,7 @@
       "popularity:co_occurrence (P1.5)": 0.0,
       "popularity:cf_density (P1)": 51.31,
       "popularity:cf_density (P1.5)": 0.0,
+      "residual (P1)": 0.0,
       "residual (P1.5)": 0.0
     },
     "popularity:co_occurrence (P1.5)": {
@@ -1898,6 +1911,7 @@
       "popularity:co_occurrence (P1.5)": 100.0,
       "popularity:cf_density (P1)": 0.0,
       "popularity:cf_density (P1.5)": 0.01,
+      "residual (P1)": 0.0,
       "residual (P1.5)": 0.0
     },
     "popularity:cf_density (P1)": {
@@ -1917,6 +1931,7 @@
       "popularity:co_occurrence (P1.5)": 0.0,
       "popularity:cf_density (P1)": 100.0,
       "popularity:cf_density (P1.5)": 0.01,
+      "residual (P1)": 0.0,
       "residual (P1.5)": 0.0
     },
     "popularity:cf_density (P1.5)": {
@@ -1936,6 +1951,27 @@
       "popularity:co_occurrence (P1.5)": 0.01,
       "popularity:cf_density (P1)": 0.01,
       "popularity:cf_density (P1.5)": 100.0,
+      "residual (P1)": 0.0,
+      "residual (P1.5)": 0.0
+    },
+    "residual (P1)": {
+      "fixed_L2": 0.0,
+      "fixed": 0.0,
+      "fixed_L6": 0.0,
+      "fixed_L8": 0.0,
+      "fixed_L10": 0.0,
+      "shortest_unique (P1)": 0.0,
+      "popularity:frequency (P1)": 0.0,
+      "popularity:frequency (P1.5)": 0.0,
+      "popularity:user_entropy (P1)": 0.0,
+      "popularity:user_entropy (P1.5)": 0.0,
+      "popularity:pagerank (P1)": 0.0,
+      "popularity:pagerank (P1.5)": 0.0,
+      "popularity:co_occurrence (P1)": 0.0,
+      "popularity:co_occurrence (P1.5)": 0.0,
+      "popularity:cf_density (P1)": 0.0,
+      "popularity:cf_density (P1.5)": 0.0,
+      "residual (P1)": 100.0,
       "residual (P1.5)": 0.0
     },
     "residual (P1.5)": {
@@ -1955,6 +1991,7 @@
       "popularity:co_occurrence (P1.5)": 0.0,
       "popularity:cf_density (P1)": 0.0,
       "popularity:cf_density (P1.5)": 0.0,
+      "residual (P1)": 0.0,
       "residual (P1.5)": 100.0
     }
   },
@@ -1976,6 +2013,7 @@
       "popularity:co_occurrence (P1.5)": 1.516,
       "popularity:cf_density (P1)": 1.15,
       "popularity:cf_density (P1.5)": 1.088,
+      "residual (P1)": 1.996,
       "residual (P1.5)": 1.915
     },
     "fixed": {
@@ -1995,6 +2033,7 @@
       "popularity:co_occurrence (P1.5)": 0.564,
       "popularity:cf_density (P1)": 0.851,
       "popularity:cf_density (P1.5)": 1.319,
+      "residual (P1)": 0.004,
       "residual (P1.5)": 0.088
     },
     "fixed_L6": {
@@ -2014,6 +2053,7 @@
       "popularity:co_occurrence (P1.5)": 2.564,
       "popularity:cf_density (P1)": 2.851,
       "popularity:cf_density (P1.5)": 3.319,
+      "residual (P1)": 2.004,
       "residual (P1.5)": 2.088
     },
     "fixed_L8": {
@@ -2033,6 +2073,7 @@
       "popularity:co_occurrence (P1.5)": 4.564,
       "popularity:cf_density (P1)": 4.851,
       "popularity:cf_density (P1.5)": 5.319,
+      "residual (P1)": 4.004,
       "residual (P1.5)": 4.088
     },
     "fixed_L10": {
@@ -2052,6 +2093,7 @@
       "popularity:co_occurrence (P1.5)": 6.564,
       "popularity:cf_density (P1)": 6.851,
       "popularity:cf_density (P1.5)": 7.319,
+      "residual (P1)": 6.004,
       "residual (P1.5)": 6.088
     },
     "shortest_unique (P1)": {
@@ -2071,6 +2113,7 @@
       "popularity:co_occurrence (P1.5)": 1.177,
       "popularity:cf_density (P1)": 0.577,
       "popularity:cf_density (P1.5)": 1.045,
+      "residual (P1)": 1.427,
       "residual (P1.5)": 1.39
     },
     "popularity:frequency (P1)": {
@@ -2090,6 +2133,7 @@
       "popularity:co_occurrence (P1.5)": 0.299,
       "popularity:cf_density (P1)": 0.633,
       "popularity:cf_density (P1.5)": 1.1,
+      "residual (P1)": 0.34,
       "residual (P1.5)": 0.384
     },
     "popularity:frequency (P1.5)": {
@@ -2109,6 +2153,7 @@
       "popularity:co_occurrence (P1.5)": 0.204,
       "popularity:cf_density (P1)": 0.738,
       "popularity:cf_density (P1.5)": 1.07,
+      "residual (P1)": 0.443,
       "residual (P1.5)": 0.47
     },
     "popularity:user_entropy (P1)": {
@@ -2128,6 +2173,7 @@
       "popularity:co_occurrence (P1.5)": 0.547,
       "popularity:cf_density (P1)": 0.488,
       "popularity:cf_density (P1.5)": 0.956,
+      "residual (P1)": 0.758,
       "residual (P1.5)": 0.763
     },
     "popularity:user_entropy (P1.5)": {
@@ -2147,6 +2193,7 @@
       "popularity:co_occurrence (P1.5)": 0.648,
       "popularity:cf_density (P1)": 0.898,
       "popularity:cf_density (P1.5)": 0.863,
+      "residual (P1)": 1.164,
       "residual (P1.5)": 1.14
     },
     "popularity:pagerank (P1)": {
@@ -2166,6 +2213,7 @@
       "popularity:co_occurrence (P1.5)": 0.327,
       "popularity:cf_density (P1)": 0.594,
       "popularity:cf_density (P1.5)": 1.062,
+      "residual (P1)": 0.455,
       "residual (P1.5)": 0.487
     },
     "popularity:pagerank (P1.5)": {
@@ -2185,6 +2233,7 @@
       "popularity:co_occurrence (P1.5)": 0.222,
       "popularity:cf_density (P1)": 0.747,
       "popularity:cf_density (P1.5)": 1.021,
+      "residual (P1)": 0.605,
       "residual (P1.5)": 0.617
     },
     "popularity:co_occurrence (P1)": {
@@ -2204,6 +2253,7 @@
       "popularity:co_occurrence (P1.5)": 0.157,
       "popularity:cf_density (P1)": 0.594,
       "popularity:cf_density (P1.5)": 1.062,
+      "residual (P1)": 0.41,
       "residual (P1.5)": 0.45
     },
     "popularity:co_occurrence (P1.5)": {
@@ -2223,6 +2273,7 @@
       "popularity:co_occurrence (P1.5)": 0.0,
       "popularity:cf_density (P1)": 0.751,
       "popularity:cf_density (P1.5)": 1.018,
+      "residual (P1)": 0.565,
       "residual (P1.5)": 0.587
     },
     "popularity:cf_density (P1)": {
@@ -2242,6 +2293,7 @@
       "popularity:co_occurrence (P1.5)": 0.751,
       "popularity:cf_density (P1)": 0.0,
       "popularity:cf_density (P1.5)": 0.468,
+      "residual (P1)": 0.851,
       "residual (P1.5)": 0.856
     },
     "popularity:cf_density (P1.5)": {
@@ -2261,7 +2313,28 @@
       "popularity:co_occurrence (P1.5)": 1.018,
       "popularity:cf_density (P1)": 0.468,
       "popularity:cf_density (P1.5)": 0.0,
+      "residual (P1)": 1.317,
       "residual (P1.5)": 1.296
+    },
+    "residual (P1)": {
+      "fixed_L2": 1.996,
+      "fixed": 0.004,
+      "fixed_L6": 2.004,
+      "fixed_L8": 4.004,
+      "fixed_L10": 6.004,
+      "shortest_unique (P1)": 1.427,
+      "popularity:frequency (P1)": 0.34,
+      "popularity:frequency (P1.5)": 0.443,
+      "popularity:user_entropy (P1)": 0.758,
+      "popularity:user_entropy (P1.5)": 1.164,
+      "popularity:pagerank (P1)": 0.455,
+      "popularity:pagerank (P1.5)": 0.605,
+      "popularity:co_occurrence (P1)": 0.41,
+      "popularity:co_occurrence (P1.5)": 0.565,
+      "popularity:cf_density (P1)": 0.851,
+      "popularity:cf_density (P1.5)": 1.317,
+      "residual (P1)": 0.0,
+      "residual (P1.5)": 0.089
     },
     "residual (P1.5)": {
       "fixed_L2": 1.915,
@@ -2280,6 +2353,7 @@
       "popularity:co_occurrence (P1.5)": 0.587,
       "popularity:cf_density (P1)": 0.856,
       "popularity:cf_density (P1.5)": 1.296,
+      "residual (P1)": 0.089,
       "residual (P1.5)": 0.0
     }
   }
