@@ -1372,8 +1372,6 @@ class TestPhase15Reporting(unittest.TestCase):
 
                 plot_png = res_dir / f"rate_distortion_frontier_{dataset}_phase1.5_max4.png"
                 self.assertTrue(plot_png.exists())
-                length_plot_png = res_dir / f"length_comparison_{dataset}_phase1.5_max4.png"
-                self.assertTrue(length_plot_png.exists())
                 # Verify duplicate strategy_comparison file was eliminated
                 duplicate_png = res_dir / f"strategy_comparison_{dataset}_phase1.5_max4.png"
                 self.assertFalse(duplicate_png.exists())
@@ -1382,9 +1380,8 @@ class TestPhase15Reporting(unittest.TestCase):
                 with open(md_file) as f:
                     md_text = f.read()
 
-                # Verify markdown embeds both plots in Section 3
+                # Verify markdown embeds plot in Section 3
                 self.assertIn(f"![Phase 1.5 Rate-Distortion Pareto Frontier]({plot_png.name})", md_text)
-                self.assertIn(f"![Phase 1.5 Codebook Depth & Strategy Comparison]({length_plot_png.name})", md_text)
                 self.assertNotIn("### Performance & Rate-Distortion Overview", md_text)
 
             finally:
@@ -1394,7 +1391,6 @@ class TestPhase15Reporting(unittest.TestCase):
             orig_argv = sys.argv
             try:
                 if plot_png.exists(): plot_png.unlink()
-                if length_plot_png.exists(): length_plot_png.unlink()
 
                 sys.argv = [
                     "generate_comparison_report.py",
@@ -1409,12 +1405,10 @@ class TestPhase15Reporting(unittest.TestCase):
 
                 # Verify no plot was created
                 self.assertFalse(plot_png.exists())
-                self.assertFalse(length_plot_png.exists())
 
                 with open(md_file) as f:
                     md_text = f.read()
                 self.assertNotIn("![Phase 1.5 Rate-Distortion Pareto Frontier]", md_text)
-                self.assertNotIn("![Phase 1.5 Codebook Depth & Strategy Comparison]", md_text)
             finally:
                 sys.argv = orig_argv
 
@@ -1492,15 +1486,11 @@ class TestPhase15Reporting(unittest.TestCase):
                     mod.main()
 
                 plot_png = res_dir / f"rate_distortion_frontier_{dataset}_max4.png"
-                length_plot_png = res_dir / f"length_comparison_{dataset}_max4.png"
 
                 # Single unified plot exists
                 self.assertTrue(plot_png.exists())
                 self.assertFalse((res_dir / f"rate_distortion_frontier_{dataset}_phase1_max4.png").exists())
                 self.assertFalse((res_dir / f"rate_distortion_frontier_{dataset}_phase1.5_max4.png").exists())
-                self.assertTrue(length_plot_png.exists())
-                self.assertFalse((res_dir / f"length_comparison_{dataset}_phase1_max4.png").exists())
-                self.assertFalse((res_dir / f"length_comparison_{dataset}_phase1.5_max4.png").exists())
 
                 # Check markdown report
                 md_file = res_dir / f"strategy_comparison_max4.md"
@@ -1508,7 +1498,6 @@ class TestPhase15Reporting(unittest.TestCase):
                     md_text = f.read()
 
                 self.assertIn(f"![Rate-Distortion Pareto Frontier]({plot_png.name})", md_text)
-                self.assertIn(f"![Codebook Depth & Strategy Comparison]({length_plot_png.name})", md_text)
                 self.assertNotIn("### Performance & Rate-Distortion Overview", md_text)
 
                 # Check JSON output
@@ -1516,7 +1505,6 @@ class TestPhase15Reporting(unittest.TestCase):
                 with open(json_file) as f:
                     jdata = json.load(f)
                 self.assertIn(plot_png.name, jdata.get("plot_files", []))
-                self.assertIn(length_plot_png.name, jdata.get("plot_files", []))
 
             finally:
                 sys.argv = orig_argv
@@ -1588,18 +1576,15 @@ class TestPhase15Reporting(unittest.TestCase):
                 self.assertTrue((res_dir / "strategy_comparison_max4.md").exists())
                 self.assertTrue((res_dir / "strategy_comparison_max4.json").exists())
                 self.assertTrue((res_dir / f"rate_distortion_frontier_{dataset}_max4.png").exists())
-                self.assertTrue((res_dir / f"length_comparison_{dataset}_max4.png").exists())
 
                 self.assertTrue((res_dir / "strategy_comparison_max10.md").exists())
                 self.assertTrue((res_dir / "strategy_comparison_max10.json").exists())
                 self.assertTrue((res_dir / f"rate_distortion_frontier_{dataset}_max10.png").exists())
-                self.assertTrue((res_dir / f"length_comparison_{dataset}_max10.png").exists())
 
                 # Verify no duplicated untagged files were generated
                 self.assertFalse((res_dir / "strategy_comparison.md").exists())
                 self.assertFalse((res_dir / "strategy_comparison.json").exists())
                 self.assertFalse((res_dir / f"rate_distortion_frontier_{dataset}.png").exists())
-                self.assertFalse((res_dir / f"length_comparison_{dataset}.png").exists())
             finally:
                 sys.argv = orig_argv
 
@@ -1698,88 +1683,6 @@ class TestPhase15Reporting(unittest.TestCase):
             self.assertIsNotNone(metrics)
             self.assertAlmostEqual(metrics["hit@1"], 0.035)
             self.assertAlmostEqual(metrics["ndcg@10"], 0.067)
-
-    def test_generate_length_comparison_plot_with_fixed_line_and_strategy_scatter(self):
-        from unittest.mock import MagicMock, patch
-        spec = importlib.util.spec_from_file_location(
-            "generate_comparison_report",
-            os.path.join(os.path.dirname(__file__), "..", "generate_comparison_report.py"),
-        )
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        rd_data = {
-            "fixed_curve": [
-                {
-                    "length": 2,
-                    "strategy": "fixed_L2",
-                    "mean_length": 2.0,
-                    "status": "completed",
-                    "metrics": {"hit@1": 0.03, "hit@5": 0.06, "hit@10": 0.08, "ndcg@5": 0.05, "ndcg@10": 0.06},
-                },
-                {
-                    "length": 4,
-                    "strategy": "fixed",
-                    "mean_length": 4.0,
-                    "status": "completed",
-                    "metrics": {"hit@1": 0.05, "hit@5": 0.08, "hit@10": 0.10, "ndcg@5": 0.07, "ndcg@10": 0.08},
-                },
-            ],
-            "variable_bracketed": [
-                {
-                    "strategy": "residual",
-                    "phase": "1.5",
-                    "mean_length": 3.2,
-                    "status": "completed",
-                    "metrics": {"hit@1": 0.048, "hit@5": 0.078, "hit@10": 0.098, "ndcg@5": 0.068, "ndcg@10": 0.078},
-                }
-            ],
-            "pareto_points": [],
-            "summary": {},
-        }
-
-        mock_plt = MagicMock()
-        mock_fig = MagicMock()
-        mock_ax1 = MagicMock()
-        mock_ax2 = MagicMock()
-        mock_ax3 = MagicMock()
-        mock_ax4 = MagicMock()
-        for ax in [mock_ax1, mock_ax2, mock_ax3, mock_ax4]:
-            ax.get_legend_handles_labels.return_value = ([], [])
-        mock_axes = [[mock_ax1, mock_ax2], [mock_ax3, mock_ax4]]
-        mock_plt.subplots.return_value = (mock_fig, mock_axes)
-
-        mock_matplotlib = MagicMock()
-        mock_matplotlib.pyplot = mock_plt
-
-        with patch.dict("sys.modules", {"matplotlib": mock_matplotlib, "matplotlib.pyplot": mock_plt}):
-            out_file = "/tmp/test_length_plot.png"
-            success = mod.generate_length_comparison_plot(
-                rd_data=rd_data,
-                dataset="TestDS",
-                model_name="tiger",
-                out_png_path=out_file,
-                phase=None,
-                max_length=4,
-            )
-            self.assertTrue(success)
-            # Verify ax.plot was called for the fixed baseline curve on ax1 (Hit@10)
-            self.assertTrue(mock_ax1.plot.called)
-            plot_args = mock_ax1.plot.call_args[0]
-            self.assertEqual(plot_args[0], [2, 4])
-            self.assertEqual(plot_args[1], [8.0, 10.0])
-            self.assertEqual(mock_ax1.plot.call_args[1].get("label"), "Fixed Baseline")
-
-            # Verify ax.scatter was called for variable strategy
-            self.assertTrue(mock_ax1.scatter.called)
-            scatter_args = mock_ax1.scatter.call_args[0]
-            self.assertEqual(scatter_args[0], 3.2)
-            self.assertAlmostEqual(scatter_args[1], 9.8)
-
-            # Verify savefig was called
-            mock_fig.savefig.assert_called_once()
-
-
 
 
 class TestGenerateIndicesResidual(unittest.TestCase):

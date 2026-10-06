@@ -763,217 +763,6 @@ def generate_rate_distortion_plot(
         return False
 
 
-def generate_length_comparison_plot(
-    rd_data,
-    dataset,
-    model_name,
-    out_png_path,
-    phase=None,
-    max_length=4,
-    **kwargs,
-):
-    """Generate a 4-panel publication-quality plot comparing codebook depth and strategy scores (styled like generate_length_report)."""
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("[Tip] matplotlib is not installed. To generate plot images, run: pip install matplotlib", file=sys.stderr)
-        return False
-
-    fixed_curve = rd_data.get("fixed_curve", [])
-    all_var_list = rd_data.get("variable_bracketed", [])
-
-    if phase is not None:
-        var_list = [v for v in all_var_list if str(v.get("phase")) == str(phase)]
-    else:
-        var_list = all_var_list
-
-    has_var_data = any(v.get("status") == "completed" for v in var_list)
-    has_fixed_data = any(f.get("status") == "completed" or f.get("metrics") for f in fixed_curve)
-    if not has_fixed_data and not has_var_data:
-        return False
-
-    fig, axes = plt.subplots(2, 2, figsize=(11, 8.5), dpi=300)
-    try:
-        ax1, ax2 = axes[0, 0], axes[0, 1]
-        ax3, ax4 = axes[1, 0], axes[1, 1]
-    except (TypeError, IndexError):
-        ax1, ax2 = axes[0][0], axes[0][1]
-        ax3, ax4 = axes[1][0], axes[1][1]
-
-    phase_label = f" (Phase {phase})" if phase else ""
-    fig.suptitle(
-        f"Fixed-Length Codebook Depth & Strategy Comparison{phase_label}: {model_name} ({dataset})",
-        fontsize=14,
-        fontweight="bold",
-        y=0.98,
-    )
-
-    palette = {
-        "shortest_unique": "#e67e22",      # orange
-        "residual": "#27ae60",             # emerald green
-        "popularity:frequency": "#2980b9", # blue
-        "user_entropy": "#8e44ad",         # purple
-        "entropy": "#8e44ad",              # purple
-        "pagerank": "#16a085",             # teal
-        "pr": "#16a085",                   # teal
-        "co_occurrence": "#f1c40f",        # yellow
-        "cooccur": "#f1c40f",              # yellow
-        "co_occur": "#f1c40f",             # yellow
-        "cooccurrence": "#f1c40f",         # yellow
-        "cf_density": "#c0392b",           # deep red
-        "cf": "#c0392b",                   # deep red
-        "popularity": "#2980b9",           # blue
-    }
-
-    def get_color(strat_name):
-        sig = None
-        if strat_name.startswith("popularity:") or strat_name.startswith("collaborative:"):
-            sig = strat_name.split(":", 1)[1].strip()
-        elif strat_name.startswith("varlen-pop-"):
-            sig = strat_name[len("varlen-pop-"):].split("_")[0].split("-")[0].strip()
-
-        if sig is not None:
-            signal_palette = {
-                "frequency": "#2980b9",
-                "raw": "#2980b9",
-                "pop": "#2980b9",
-                "user_entropy": "#8e44ad",
-                "entropy": "#8e44ad",
-                "pagerank": "#16a085",
-                "pr": "#16a085",
-                "co_occurrence": "#f1c40f",
-                "cooccur": "#f1c40f",
-                "co_occur": "#f1c40f",
-                "cooccurrence": "#f1c40f",
-                "cf_density": "#c0392b",
-                "cf": "#c0392b",
-            }
-            if sig in signal_palette:
-                return signal_palette[sig]
-
-        specific_keys = [
-            "shortest_unique",
-            "residual",
-            "popularity:frequency",
-            "user_entropy",
-            "entropy",
-            "pagerank",
-            "-pr",
-            "co_occurrence",
-            "cooccur",
-            "co_occur",
-            "cooccurrence",
-            "cf_density",
-            "-cf",
-            "popularity",
-        ]
-        for k in specific_keys:
-            if k in strat_name:
-                return palette.get(k.lstrip("-"), "#7f8c8d")
-        return "#7f8c8d"
-
-    metric_panels = [
-        (ax1, "hit@10", "Hit@10"),
-        (ax2, "ndcg@10", "NDCG@10"),
-        (ax3, "hit@5", "Hit@5"),
-        (ax4, "ndcg@5", "NDCG@5"),
-    ]
-
-    global_legend_items = {}
-
-    for ax, metric_key, metric_label in metric_panels:
-        valid_fixed = [
-            f for f in fixed_curve
-            if f.get("metrics", {}).get(metric_key) is not None
-            and f.get("status", "completed") == "completed"
-        ]
-        valid_fixed.sort(key=lambda x: x["length"])
-        if valid_fixed:
-            fx_lens = [f["length"] for f in valid_fixed]
-            fx_vals = [f["metrics"][metric_key] * 100.0 for f in valid_fixed]
-            ax.plot(
-                fx_lens, fx_vals,
-                color="#2c3e50", marker="o", markersize=6.5, linewidth=2.2,
-                label="Fixed Baseline", zorder=3
-            )
-            for x, y, f in zip(fx_lens, fx_vals, valid_fixed):
-                lbl = f"L={int(x) if x.is_integer() else x}"
-                ax.annotate(lbl, (x, y), textcoords="offset points", xytext=(0, 7),
-                            ha="center", fontsize=8, color="#2c3e50", fontweight="bold")
-
-        for v in var_list:
-            if v.get("status") != "completed" or v.get("mean_length") is None:
-                continue
-            val = v.get("metrics", {}).get(metric_key)
-            if val is None:
-                continue
-            x = v["mean_length"]
-            y = val * 100.0
-            strat = v["strategy"]
-            v_ph = str(v.get("phase", ""))
-            c = get_color(strat)
-
-            marker = "*" if v_ph == "1.5" else "s"
-            size = 130 if v_ph == "1.5" else 85
-            alpha = 0.95 if v_ph == "1.5" else 0.85
-            label_tag = strat if phase else (f"{strat} (P{v_ph})" if v_ph not in ("fixed", "-", "") else strat)
-
-            ax.scatter(x, y, color=c, marker=marker, s=size, alpha=alpha,
-                       edgecolors="black", linewidths=0.8, zorder=5, label=label_tag)
-
-        ax.set_title(f"{metric_label} vs. Codebook Depth", fontsize=11, fontweight="bold")
-        ax.set_xlabel("Codebook Depth / Sequence Length (L)", fontsize=9.5)
-        ax.set_ylabel(f"{metric_label} (%)", fontsize=9.5)
-        ax.grid(True, linestyle="--", alpha=0.5)
-
-        all_pts_x = []
-        if valid_fixed:
-            all_pts_x.extend([f["length"] for f in valid_fixed])
-        all_pts_x.extend([
-            v["mean_length"] for v in var_list
-            if v.get("status") == "completed" and v.get("mean_length") is not None
-        ])
-        if all_pts_x:
-            unique_int_lens = sorted(list(set([int(round(px)) for px in all_pts_x])))
-            if len(unique_int_lens) > 1 and max(unique_int_lens) - min(unique_int_lens) >= 1:
-                ax.set_xticks(unique_int_lens)
-
-        try:
-            handles, labels = ax.get_legend_handles_labels()
-            for h, l in zip(handles, labels):
-                if l and l not in global_legend_items:
-                    global_legend_items[l] = h
-        except (TypeError, ValueError):
-            pass
-
-    plt.tight_layout(rect=[0, 0.08, 1, 0.96])
-    if global_legend_items:
-        n_items = len(global_legend_items)
-        ncol = min(4, n_items)
-        fig.legend(
-            global_legend_items.values(),
-            global_legend_items.keys(),
-            loc="lower center",
-            bbox_to_anchor=(0.5, 0.01),
-            ncol=ncol,
-            fontsize=8.5,
-            frameon=True,
-            framealpha=0.95,
-        )
-
-    try:
-        fig.savefig(out_png_path, dpi=300, bbox_inches="tight")
-        plt.close(fig)
-        print(f"Plot image saved to:    {out_png_path}")
-        return True
-    except Exception as e:
-        print(f"[Warning] Failed to save plot: {e}", file=sys.stderr)
-        plt.close(fig)
-        return False
-
-
 generate_comparison_plot = generate_rate_distortion_plot
 
 
@@ -1282,15 +1071,14 @@ def generate_report_for_max_length(
     p15_by_strat = {r["strategy"]: r for r in recom_table_data if r["phase"] == "1.5"}
     common_h2h = [s for s in p1_by_strat if s in p15_by_strat]
 
-    # Plot generation: Both Rate-Distortion Pareto Frontier and Codebook Depth & Strategy Comparison
+    # Plot generation: Rate-Distortion Pareto Frontier plot
     generated_plots = {}
-    generated_lc_plots = {}
     all_plot_files = []
     if not args.no_plot:
         p_val = target_phase if target_phase in ("1", "1.5") else None
         p_sfx = f"_phase{p_val}" if p_val else ""
 
-        # 1. Rate-Distortion Pareto Frontier plot
+        # Rate-Distortion Pareto Frontier plot
         rd_fname = f"rate_distortion_frontier_{dataset}{p_sfx}{tag}.png"
         rd_path = os.path.join(report_dir, rd_fname)
         rd_saved = generate_rate_distortion_plot(
@@ -1304,21 +1092,6 @@ def generate_report_for_max_length(
         if rd_saved:
             generated_plots[p_val] = rd_fname
             all_plot_files.append(rd_fname)
-
-        # 2. Fixed-Length Codebook Depth & Strategy Comparison plot
-        lc_fname = f"length_comparison_{dataset}{p_sfx}{tag}.png"
-        lc_path = os.path.join(report_dir, lc_fname)
-        lc_saved = generate_length_comparison_plot(
-            rd_data=rd_data,
-            dataset=dataset,
-            model_name=model_name,
-            out_png_path=lc_path,
-            phase=p_val,
-            max_length=max_length,
-        )
-        if lc_saved:
-            generated_lc_plots[p_val] = lc_fname
-            all_plot_files.append(lc_fname)
 
     # -------------------------------------------------------------
     # 1. TEXT FORMATTING
@@ -1834,21 +1607,6 @@ def generate_report_for_max_length(
                         f"![{p_title}]({p_img})\n",
                     ])
 
-        if generated_lc_plots:
-            if len(generated_lc_plots) > 1:
-                for p_key, p_img in sorted(generated_lc_plots.items(), key=lambda x: str(x[0])):
-                    p_title = f"Phase {p_key} Codebook Depth & Strategy Comparison" if p_key else "Codebook Depth & Strategy Comparison"
-                    md_lines.extend([
-                        f"#### {p_title}\n",
-                        f"![{p_title}]({p_img})\n",
-                    ])
-            else:
-                for p_key, p_img in generated_lc_plots.items():
-                    p_title = f"Phase {p_key} Codebook Depth & Strategy Comparison" if p_key else "Codebook Depth & Strategy Comparison"
-                    md_lines.extend([
-                        f"#### {p_title}\n",
-                        f"![{p_title}]({p_img})\n",
-                    ])
 
         if len(fixed_curve) > 1:
             md_lines.extend([
