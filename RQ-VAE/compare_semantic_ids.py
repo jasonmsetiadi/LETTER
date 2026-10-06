@@ -857,9 +857,19 @@ def main():
     pairwise_mae = eval_data["pairwise_mae_tokens"]
 
     # Table output
-    layer_keys = list(range(1, args.max_length + 1))
+    max_k = args.max_length
+    for r in results:
+        dist = r.get("length_distribution", {})
+        if dist:
+            for k in dist:
+                try:
+                    max_k = max(max_k, int(k))
+                except (ValueError, TypeError):
+                    pass
+    layer_keys = list(range(1, max_k + 1))
     layer_headers = [f"L={k}" for k in layer_keys]
     layer_widths = [max(6, len(h)) for h in layer_headers]
+
     strat_col_w = max(20, max(len(r["label"]) for r in results) if results else 20)
 
     layer_hdr_str = " | ".join(f"{h:>{w}}" for h, w in zip(layer_headers, layer_widths))

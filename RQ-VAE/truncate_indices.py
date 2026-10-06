@@ -265,7 +265,10 @@ def truncate_indices(
     item_scores=None,
     residuals=None,
     residual_threshold=0.2,
+    disambiguate=False,
 ):
+
+
     """Truncate each item according to the selected variable-length strategy.
 
     Strategies:
@@ -379,7 +382,16 @@ def truncate_indices(
         truncated[item_id] = tokens[:chosen_len]
         lengths[item_id] = chosen_len
 
+    if disambiguate:
+        try:
+            from utils import disambiguate_indices
+        except ImportError:
+            from .utils import disambiguate_indices
+        truncated = disambiguate_indices(truncated)
+        lengths = {k: len(v) for k, v in truncated.items()}
+
     return truncated, lengths
+
 
 
 def resolve_target_lengths(
@@ -610,6 +622,19 @@ def main():
         dest="allow_base_collisions",
         help="Disallow any collisions and raise an error if unique IDs cannot be produced.",
     )
+    parser.add_argument(
+        "--disambiguate",
+        action="store_true",
+        default=True,
+        help="Append terminal disambiguation token to guarantee zero collisions (default: True).",
+    )
+    parser.add_argument(
+        "--no-disambiguate",
+        "--no_disambiguate",
+        dest="disambiguate",
+        action="store_false",
+        help="Do not append disambiguation token.",
+    )
     args = parser.parse_args()
 
     if args.strategy in ("popularity", "collaborative"):
@@ -654,7 +679,9 @@ def main():
         item_scores=item_scores,
         residuals=residuals,
         residual_threshold=args.residual_threshold,
+        disambiguate=args.disambiguate,
     )
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as output_file:
         json.dump(truncated, output_file)

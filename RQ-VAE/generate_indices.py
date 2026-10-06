@@ -14,6 +14,7 @@ from datasets import EmbDataset
 from models.rqvae import RQVAE
 import argparse
 import os
+from utils import disambiguate_indices
 
 def check_collision(all_indices_str):
     tot_item = len(all_indices_str)
@@ -97,8 +98,22 @@ def parse_args():
         dest='min_length',
         help='Minimum length for dynamic length halting.',
     )
+    parser.add_argument(
+        '--disambiguate',
+        action='store_true',
+        default=True,
+        help='Append terminal disambiguation token to guarantee zero collisions.',
+    )
+    parser.add_argument(
+        '--no-disambiguate',
+        '--no_disambiguate',
+        dest='disambiguate',
+        action='store_false',
+        help='Do not append disambiguation token.',
+    )
 
     return parser.parse_args()
+
 
 
 args_setting = parse_args()
@@ -282,16 +297,18 @@ while True:
     tt += 1
 
 
-print("All indices number: ",len(all_indices))
-print("Max number of conflicts: ", max(get_indices_count(all_indices_str).values()))
-
-tot_item = len(all_indices_str)
-tot_indice = len(set(all_indices_str.tolist()))
-print("Collision Rate",(tot_item-tot_indice)/tot_item)
-
 all_indices_dict = {}
 for item, indices in enumerate(all_indices.tolist()):
     all_indices_dict[item] = list(indices)
+
+if getattr(args_setting, "disambiguate", True):
+    all_indices_dict = disambiguate_indices(all_indices_dict)
+
+tot_item = len(all_indices_dict)
+tot_indice = len(set(tuple(v) for v in all_indices_dict.values()))
+print("All indices number: ", tot_item)
+print("Unique indices number: ", tot_indice)
+print("Collision Rate: ", (tot_item - tot_indice) / tot_item)
 
 out_dir = os.path.dirname(output_file)
 if out_dir:
@@ -318,4 +335,5 @@ with open(summary_file, 'w', encoding='utf-8') as sf:
     json.dump(summary_payload, sf, indent=2)
 print(f"Saved {len(all_indices_dict)} IDs (phase {phase_mode}) to {output_file}")
 print(f"Saved index summary to {summary_file}")
+
 

@@ -1175,9 +1175,19 @@ def generate_report_for_max_length(
     rec_lines.append(rec_sep)
 
     # Section 2: Semantic ID Evaluation & Compression Table
-    layer_keys = list(range(1, max_length + 1))
+    max_k = max_length
+    for r in sid_table_data:
+        dist = r.get("length_distribution", {})
+        if dist:
+            for k in dist:
+                try:
+                    max_k = max(max_k, int(k))
+                except (ValueError, TypeError):
+                    pass
+    layer_keys = list(range(1, max_k + 1))
     layer_headers = [f"L={k}" for k in layer_keys]
     layer_widths = [max(6, len(h)) for h in layer_headers]
+
     layer_hdr_str = " | ".join(f"{h:>{w}}" for h, w in zip(layer_headers, layer_widths))
     layer_sep_str = "+".join("-" * (w + 2) for w in layer_widths)
 
