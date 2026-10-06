@@ -17,6 +17,7 @@ from transformers import T5Tokenizer
 
 
 TOKEN_PATTERN = re.compile(r"<([a-z])_(\d+)>")
+DIS_TOKEN_PATTERN = re.compile(r"<dis_(\d+)>")
 
 
 class BaseDataset(Dataset):
@@ -101,13 +102,21 @@ class BaseDataset(Dataset):
                 raise ValueError(f"Item {item_id} must have a non-empty token list.")
 
             expected_prefix = ord("a")
-            for token in tokens:
+            num_tokens = len(tokens)
+            for idx, token in enumerate(tokens):
                 match = TOKEN_PATTERN.fullmatch(token)
-                if match is None or ord(match.group(1)) != expected_prefix:
+                if match is not None:
+                    if ord(match.group(1)) != expected_prefix:
+                        raise ValueError(
+                            f"Item {item_id} must use consecutive <a_*>, <b_*>, ... tokens."
+                        )
+                    expected_prefix += 1
+                elif idx > 0 and idx == num_tokens - 1 and DIS_TOKEN_PATTERN.fullmatch(token) is not None:
+                    continue
+                else:
                     raise ValueError(
                         f"Item {item_id} must use consecutive <a_*>, <b_*>, ... tokens."
                     )
-                expected_prefix += 1
 
         self.indices_validated = True
 
@@ -121,8 +130,7 @@ class BaseDataset(Dataset):
 
         return self.all_items       
     def get_prefix_allowed_tokens_fn(self, tokenizer):
-
-
+        self._ensure_valid_indices()
         if self.allowed_tokens is None:
             self.allowed_tokens = {}
             for index in self.indices.values():
