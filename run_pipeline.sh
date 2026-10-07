@@ -51,6 +51,8 @@ Execution & Device Options:
   --tiger-gpus IDS             CUDA devices for TIGER (default: autodetect, up to 2)
   --lcrec-gpus IDS             CUDA devices for LC-Rec (default: autodetect, up to 4)
   --results-file PATH          Override results JSON path
+  --keep-checkpoints           Keep model checkpoints after evaluation (default: false, automatically cleaned up)
+  --clean-checkpoints          Delete model checkpoints after evaluation completes (default: true, retains results JSON)
   --python PATH                Python executable (default: python3)
   -h, --help                   Show this help
 EOF
@@ -116,6 +118,7 @@ TARGET_LENGTHS=""
 TIGER_GPUS=""
 LCREC_GPUS=""
 RESULTS_FILE=""
+CLEAN_CHECKPOINTS="${CLEAN_CHECKPOINTS:-true}"
 TOKENIZER_ONLY=false
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
@@ -150,6 +153,8 @@ while [[ $# -gt 0 ]]; do
     --tiger-gpus) TIGER_GPUS="$2"; shift 2 ;;
     --lcrec-gpus) LCREC_GPUS="$2"; shift 2 ;;
     --results-file) RESULTS_FILE="$2"; shift 2 ;;
+    --clean-checkpoints|--delete-ckpt-after-eval) CLEAN_CHECKPOINTS=true; shift ;;
+    --keep-checkpoints|--no-clean-checkpoints) CLEAN_CHECKPOINTS=false; shift ;;
     --tokenizer-only) TOKENIZER_ONLY=true; shift ;;
     --python) PYTHON_BIN="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -893,6 +898,26 @@ if contains_model tiger; then
     "$TOK_LABEL" "$MODE" "$(format_duration "$((SECONDS - STEP_START))")"
   record_phase "[$TOK_LABEL] [$MODE] LETTER-TIGER evaluation" "$((SECONDS - STEP_START))"
   printf 'Stored LETTER-TIGER metrics: %s\n' "$CUR_TIGER_RESULTS"
+
+  # Clean intermediate checkpoint folders (checkpoint-*) if any remain
+  if [[ -d "$tiger_ckpt_dir" ]]; then
+    rm -rf "$tiger_ckpt_dir"/checkpoint-* 2>/dev/null || true
+  fi
+
+  # Post-evaluation cleanup: remove entire model checkpoint if requested and results exist
+  tiger_results_file="$CUR_TIGER_RESULTS"
+  if [[ "$tiger_results_file" != /* ]]; then
+    tiger_results_file="$REPO_ROOT/LETTER-TIGER/$tiger_results_file"
+  fi
+  if [[ "$CLEAN_CHECKPOINTS" == true ]]; then
+    if [[ -f "$tiger_results_file" && -s "$tiger_results_file" ]]; then
+      printf '[Cleanup] Removing TIGER checkpoint directory after evaluation: %s\n' "$tiger_ckpt_dir"
+      rm -rf "$tiger_ckpt_dir"
+    else
+      printf '[Cleanup] Warning: Results file (%s) missing or empty; keeping checkpoint: %s\n' \
+        "$tiger_results_file" "$tiger_ckpt_dir" >&2
+    fi
+  fi
 fi
 
 if contains_model lcrec; then
@@ -982,6 +1007,26 @@ if contains_model lcrec; then
     "$TOK_LABEL" "$MODE" "$(format_duration "$((SECONDS - STEP_START))")"
   record_phase "[$TOK_LABEL] [$MODE] LETTER-LC-Rec evaluation" "$((SECONDS - STEP_START))"
   printf 'Stored LETTER-LC-Rec metrics: %s\n' "$CUR_LCREC_RESULTS"
+
+  # Clean intermediate checkpoint folders (checkpoint-*) if any remain
+  if [[ -d "$lcrec_ckpt_dir" ]]; then
+    rm -rf "$lcrec_ckpt_dir"/checkpoint-* 2>/dev/null || true
+  fi
+
+  # Post-evaluation cleanup: remove entire model checkpoint if requested and results exist
+  lcrec_results_file="$CUR_LCREC_RESULTS"
+  if [[ "$lcrec_results_file" != /* ]]; then
+    lcrec_results_file="$REPO_ROOT/LETTER-LC-Rec/$lcrec_results_file"
+  fi
+  if [[ "$CLEAN_CHECKPOINTS" == true ]]; then
+    if [[ -f "$lcrec_results_file" && -s "$lcrec_results_file" ]]; then
+      printf '[Cleanup] Removing LC-Rec checkpoint directory after evaluation: %s\n' "$lcrec_ckpt_dir"
+      rm -rf "$lcrec_ckpt_dir"
+    else
+      printf '[Cleanup] Warning: Results file (%s) missing or empty; keeping checkpoint: %s\n' \
+        "$lcrec_results_file" "$lcrec_ckpt_dir" >&2
+    fi
+  fi
 fi
 
 print_phase_durations
