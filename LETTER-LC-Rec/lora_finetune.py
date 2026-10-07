@@ -169,6 +169,7 @@ def train(args):
             save_steps=args.save_and_eval_steps,
             output_dir=args.output_dir,
             save_total_limit=1,
+            save_only_model=True,
             load_best_model_at_end=True,
             deepspeed=deepspeed,
             ddp_find_unused_parameters=False if ddp else None,

@@ -72,6 +72,10 @@ def parse_train_args(parser):
     parser.add_argument("--bf16", action="store_true", default=False)
     parser.add_argument("--deepspeed", type=str, default="./config/ds_z3_bf16.json")
     parser.add_argument("--wandb_run_name", type=str, default="default")
+    parser.add_argument("--save_only_model", action="store_true", default=True,
+                        help="Only save model weights and skip optimizer/scheduler states to conserve disk")
+    parser.add_argument("--save_total_limit", type=int, default=1,
+                        help="Maximum number of checkpoints to retain")
     parser.add_argument("--temperature", type=float, default=1.0)
 
     return parser
