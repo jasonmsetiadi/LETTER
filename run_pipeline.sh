@@ -1029,6 +1029,17 @@ if contains_model lcrec; then
   fi
 fi
 
+# Post-pipeline cleanup: remove the tokenizer checkpoint used by this run.
+# Keep this scoped to the selected checkpoint file so other layers, phases,
+# strategies, or datasets sharing the checkpoint root are not affected.
+if [[ "$CLEAN_CHECKPOINTS" == true && -n "$CUR_RQ_CHECKPOINT" && -f "$CUR_RQ_CHECKPOINT" ]]; then
+  printf '[Cleanup] Removing %s tokenizer checkpoint: %s\n' "$TOK_LABEL" "$CUR_RQ_CHECKPOINT"
+  rm -f "$CUR_RQ_CHECKPOINT"
+  if [[ -d "$TOK_CKPT_ROOT" ]]; then
+    find "$TOK_CKPT_ROOT" -depth -type d -empty -delete 2>/dev/null || true
+  fi
+fi
+
 print_phase_durations
 printf '\nEnd-to-end recommendation pipeline completed in %s.\n' \
   "$(format_duration "$((SECONDS - PIPELINE_START))")"
