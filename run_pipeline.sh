@@ -44,7 +44,7 @@ Index Generation & Variable-Length Options:
   --collab-signal SIGNAL       Collaborative signal: frequency, user_entropy, pagerank, co_occurrence, cf_density (default: frequency)
   --inter-file PATH            Interaction JSON for popularity/collaborative strategy
   --cf-emb-file PATH           Path to CF embeddings (.pt, .npy) for cf_density signal
-  --residuals-file PATH        Residuals JSON for residual strategy
+  --residuals-file PATH        Residuals JSON for residual strategy (computed automatically if omitted)
   --residual-threshold VALUE   Reconstruction error threshold for residual strategy (default: 0.2)
 
 Execution & Device Options:
@@ -351,11 +351,6 @@ if [[ "$MODE" == "varlen" ]]; then
       if [[ "$PHASE" != "1.5" ]]; then
         if [[ -z "$RESIDUALS_FILE" ]]; then
           RESIDUALS_FILE="$DATA_ROOT/$DATASET/$DATASET.residuals.L${MAX_LENGTH}.json"
-        fi
-        if [[ ! -f "$RESIDUALS_FILE" ]]; then
-          printf 'Residuals file not found for residual strategy: %s\n' "$RESIDUALS_FILE" >&2
-          printf 'Generate it first using RQ-VAE/compute_residuals.py.\n' >&2
-          exit 1
         fi
       fi
       ;;
@@ -759,6 +754,26 @@ except Exception:
           truncate_args+=(--cf-emb-file "$CF_CANDIDATE")
         fi
       elif [[ "$STRATEGY" == "residual" ]]; then
+        if [[ ! -f "$RESIDUALS_FILE" ]]; then
+          ensure_tokenizer_checkpoint
+          printf '\n[Residuals] [%s] Computing reconstruction residuals per item...\n' "$TOK_LABEL"
+          RES_START="$SECONDS"
+          mkdir -p "$(dirname "$RESIDUALS_FILE")"
+          "$PYTHON_BIN" "$REPO_ROOT/RQ-VAE/compute_residuals.py" \
+            --dataset "$DATASET" \
+            --checkpoint-path "$CUR_RQ_CHECKPOINT" \
+            --data-path "$EMBEDDING_FILE" \
+            --output-file "$RESIDUALS_FILE" \
+            --device "$RQ_DEVICE"
+          if [[ ! -f "$RESIDUALS_FILE" ]]; then
+            printf 'Residual computation failed; could not create: %s\n' "$RESIDUALS_FILE" >&2
+            exit 1
+          fi
+          printf 'Completed %s residual computation in %s.\n' \
+            "$TOK_LABEL" "$(format_duration "$((SECONDS - RES_START))")"
+          record_phase "[$TOK_LABEL] Residual computation" "$((SECONDS - RES_START))"
+          printf 'Stored residuals file: %s\n' "$RESIDUALS_FILE"
+        fi
         truncate_args+=(--residuals-file "$RESIDUALS_FILE" --residual-threshold "$RESIDUAL_THRESHOLD")
       fi
       "${truncate_args[@]}"
