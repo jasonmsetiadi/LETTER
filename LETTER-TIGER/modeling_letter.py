@@ -14,7 +14,7 @@ import numpy as np
 from torch.nn import CrossEntropyLoss
 
 from transformers.modeling_outputs import ModelOutput, BaseModelOutput, BaseModelOutputWithPast, BaseModelOutputWithPastAndCrossAttentions, Seq2SeqLMOutput, Seq2SeqModelOutput
-from transformers.modeling_utils import PreTrainedModel, find_pruneable_heads_and_indices, prune_linear_layer
+from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import logging
 from transformers import BeamScorer, BeamSearchScorer
 def sigmoid(x):
