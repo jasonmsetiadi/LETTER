@@ -160,6 +160,9 @@ class Trainer(object):
         total_recon_loss = 0
         total_cf_loss = 0
         total_quant_loss = 0
+        total_expected_len = 0
+        total_entropy = 0
+        num_batches = len(train_data) if hasattr(train_data, "__len__") else 1
         print(len(train_data))
         iter_data = tqdm(
                     train_data,
@@ -177,22 +180,42 @@ class Trainer(object):
             data, emb_idx = data[0], data[1]
             data = data.to(self.device)
             self.optimizer.zero_grad()
-            lengths = None
-            if self.target_lengths is not None:
-                lengths = self.target_lengths[emb_idx.to(self.device)]
-            out, rq_loss, indices, dense_out, dyn_lengths = self.model(
-                data,
-                self.labels,
-                lengths=lengths,
-                residual_threshold=self.residual_threshold,
-                min_length=self.min_length,
-                return_lengths=True,
-            )
 
-            if self.online_residual and self.catalog_lengths is not None:
-                self.catalog_lengths[emb_idx.to(self.device)] = dyn_lengths
+            if self.phase == 2.0:
+                out, rq_loss, indices, dense_out, stop_probs, survival_probs, dyn_lengths = self.model(
+                    data,
+                    self.labels,
+                    return_lengths=True,
+                )
+                loss, cf_loss, loss_recon, quant_loss, expected_len, entropy = self.model.compute_loss(
+                    out,
+                    rq_loss,
+                    emb_idx,
+                    dense_out,
+                    xs=data,
+                    stop_probs=stop_probs,
+                    survival_probs=survival_probs,
+                )
+                total_expected_len += (expected_len.item() if hasattr(expected_len, "item") else float(expected_len))
+                total_entropy += (entropy.item() if hasattr(entropy, "item") else float(entropy))
+            else:
+                lengths = None
+                if self.target_lengths is not None:
+                    lengths = self.target_lengths[emb_idx.to(self.device)]
+                out, rq_loss, indices, dense_out, dyn_lengths = self.model(
+                    data,
+                    self.labels,
+                    lengths=lengths,
+                    residual_threshold=self.residual_threshold,
+                    min_length=self.min_length,
+                    return_lengths=True,
+                )
 
-            loss, cf_loss, loss_recon, quant_loss = self.model.compute_loss(out, rq_loss, emb_idx, dense_out, xs=data)
+                if self.online_residual and self.catalog_lengths is not None:
+                    self.catalog_lengths[emb_idx.to(self.device)] = dyn_lengths
+
+                loss, cf_loss, loss_recon, quant_loss = self.model.compute_loss(out, rq_loss, emb_idx, dense_out, xs=data)
+
             self._check_nan(loss)
             loss.backward()
             self.optimizer.step()
@@ -200,14 +223,19 @@ class Trainer(object):
             total_loss += loss.item()
             total_recon_loss += loss_recon.item()
             total_cf_loss += (cf_loss.item() if hasattr(cf_loss, 'item') else (cf_loss if cf_loss != 0 else 0))
-            total_quant_loss += quant_loss.item()
+            total_quant_loss += (quant_loss.item() if hasattr(quant_loss, "item") else float(quant_loss))
 
         if self.online_residual and self.catalog_lengths is not None and hasattr(self.catalog_lengths, "cpu"):
             from collections import Counter
             len_dist = dict(sorted(Counter(self.catalog_lengths.cpu().tolist()).items()))
             self.logger.info(f"[Phase 1.5 Online Residual] Epoch {epoch_idx} length distribution: {len_dist}")
 
-        return total_loss, total_recon_loss, total_cf_loss, quant_loss.item()
+        if self.phase == 2.0:
+            avg_expected_len = total_expected_len / max(num_batches, 1)
+            avg_entropy = total_entropy / max(num_batches, 1)
+            return total_loss, total_recon_loss, total_cf_loss, total_quant_loss, avg_expected_len, avg_entropy
+
+        return total_loss, total_recon_loss, total_cf_loss, total_quant_loss
 
     @torch.no_grad()
     def _valid_epoch(self, valid_data):
@@ -228,39 +256,53 @@ class Trainer(object):
             for idx, emb in enumerate(embs):
                 centers, labels = self.constrained_km(emb)
                 self.labels[str(idx)] = labels
+        all_pred_lens = []
         for batch_idx, data in enumerate(iter_data):
 
             data, emb_idx = data[0], data[1]
             num_sample += len(data)
             data = data.to(self.device)
-            indices = self.model.get_indices(data, self.labels)
-            indices = indices.view(-1,indices.shape[-1]).cpu().numpy()
-            emb_idx_np = emb_idx.cpu().numpy() if hasattr(emb_idx, "cpu") else np.array(emb_idx)
-            for j, index in enumerate(indices):
-                if self.target_lengths is not None:
-                    item_id = int(emb_idx_np[j])
-                    k_len = int(
-                        self.target_lengths[item_id].item()
-                        if hasattr(self.target_lengths[item_id], "item")
-                        else self.target_lengths[item_id]
-                    )
+
+            if self.phase == 2.0:
+                indices, pred_lengths = self.model.get_indices(data, self.labels, return_lengths=True)
+                indices = indices.view(-1, indices.shape[-1]).cpu().numpy()
+                pred_lens_np = pred_lengths.cpu().numpy()
+                all_pred_lens.extend(pred_lens_np.tolist())
+                for j, index in enumerate(indices):
+                    k_len = int(pred_lens_np[j])
                     code = "-".join([str(int(_)) for _ in index[:k_len]])
-                elif self.online_residual and self.catalog_lengths is not None:
-                    item_id = int(emb_idx_np[j])
-                    k_len = int(
-                        self.catalog_lengths[item_id].item()
-                        if hasattr(self.catalog_lengths[item_id], "item")
-                        else self.catalog_lengths[item_id]
-                    )
-                    code = "-".join([str(int(_)) for _ in index[:k_len]])
-                else:
-                    code = "-".join([str(int(_)) for _ in index])
-                indices_set.add(code)
+                    indices_set.add(code)
+            else:
+                indices = self.model.get_indices(data, self.labels)
+                indices = indices.view(-1,indices.shape[-1]).cpu().numpy()
+                emb_idx_np = emb_idx.cpu().numpy() if hasattr(emb_idx, "cpu") else np.array(emb_idx)
+                for j, index in enumerate(indices):
+                    if self.target_lengths is not None:
+                        item_id = int(emb_idx_np[j])
+                        k_len = int(
+                            self.target_lengths[item_id].item()
+                            if hasattr(self.target_lengths[item_id], "item")
+                            else self.target_lengths[item_id]
+                        )
+                        code = "-".join([str(int(_)) for _ in index[:k_len]])
+                    elif self.online_residual and self.catalog_lengths is not None:
+                        item_id = int(emb_idx_np[j])
+                        k_len = int(
+                            self.catalog_lengths[item_id].item()
+                            if hasattr(self.catalog_lengths[item_id], "item")
+                            else self.catalog_lengths[item_id]
+                        )
+                        code = "-".join([str(int(_)) for _ in index[:k_len]])
+                    else:
+                        code = "-".join([str(int(_)) for _ in index])
+                    indices_set.add(code)
 
         collision_rate = (num_sample - len(indices_set))/num_sample
-        # balance_score = self.balance_overall(tokens_appearance)
-        # wandb.log({"collision_rate": collision_rate, "balance_score": 0})
-
+        if self.phase == 2.0 and len(all_pred_lens) > 0:
+            from collections import Counter
+            len_dist = dict(sorted(Counter(all_pred_lens).items()))
+            avg_len = sum(all_pred_lens) / len(all_pred_lens)
+            self.logger.info(f"[Phase 2.0 Validation] Mean length: {avg_len:.3f}, Distribution: {len_dist}")
 
         return collision_rate
 
@@ -283,6 +325,8 @@ class Trainer(object):
             "target_lengths": target_lengths_data,
             "residual_threshold": self.residual_threshold,
             "min_length": self.min_length,
+            "length_cost": getattr(self.args, "length_cost", 0.05),
+            "length_entropy_weight": getattr(self.args, "length_entropy_weight", 0.01),
             "best_loss": self.best_loss,
             "best_collision_rate": self.best_collision_rate,
             "state_dict": self.model.state_dict(),
@@ -295,7 +339,7 @@ class Trainer(object):
         )
 
 
-    def _generate_train_loss_output(self, epoch_idx, s_time, e_time, loss, recon_loss, cf_loss):
+    def _generate_train_loss_output(self, epoch_idx, s_time, e_time, loss, recon_loss, cf_loss, expected_len=None, entropy=None):
         train_loss_output = (
             set_color("epoch %d training", "green")
             + " ["
@@ -307,6 +351,10 @@ class Trainer(object):
         train_loss_output += set_color("reconstruction loss", "blue") + ": %.4f" % recon_loss
         train_loss_output +=", "
         train_loss_output += set_color("cf loss", "blue") + ": %.4f" % cf_loss
+        if expected_len is not None:
+            train_loss_output += ", " + set_color("expected len", "blue") + ": %.3f" % expected_len
+        if entropy is not None:
+            train_loss_output += ", " + set_color("entropy", "blue") + ": %.4f" % entropy
         return train_loss_output + "]"
 
     def fit(self, data):
@@ -321,11 +369,15 @@ class Trainer(object):
         for epoch_idx in range(self.epochs):
             # train
             training_start_time = time()
-            train_loss, train_recon_loss, cf_loss, quant_loss = self._train_epoch(data, epoch_idx)
+            train_results = self._train_epoch(data, epoch_idx)
+            train_loss, train_recon_loss, cf_loss, quant_loss = train_results[:4]
+            expected_len = train_results[4] if len(train_results) > 4 else None
+            entropy = train_results[5] if len(train_results) > 5 else None
 
             training_end_time = time()
             train_loss_output = self._generate_train_loss_output(
-                epoch_idx, training_start_time, training_end_time, train_loss, train_recon_loss, cf_loss
+                epoch_idx, training_start_time, training_end_time, train_loss, train_recon_loss, cf_loss,
+                expected_len=expected_len, entropy=entropy
             )
             self.logger.info(train_loss_output)
 

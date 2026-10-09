@@ -58,9 +58,11 @@ class ResidualVectorQuantizer(nn.Module):
         min_length=1,
         use_sk=True,
         return_lengths=False,
+        return_prefixes=False,
     ):
         all_losses = []
         all_indices = []
+        all_xq_prefixes = []
 
         x_q = 0
         residual = x
@@ -79,7 +81,7 @@ class ResidualVectorQuantizer(nn.Module):
                 norm_x = 1.0
 
         for idx, quantizer in enumerate(self.vq_layers):
-            label = labels[str(idx)]
+            label = labels[str(idx)] if labels is not None and str(idx) in labels else None
             depth = idx + 1
 
             if lengths is not None:
@@ -112,11 +114,18 @@ class ResidualVectorQuantizer(nn.Module):
                 all_losses.append(loss)
 
             all_indices.append(indices)
+            if return_prefixes:
+                all_xq_prefixes.append(x_q)
+
+        all_indices = torch.stack(all_indices, dim=-1) if hasattr(torch, "stack") else all_indices
+
+        if return_prefixes:
+            stacked_xq = torch.stack(all_xq_prefixes, dim=1) if hasattr(torch, "stack") else all_xq_prefixes
+            return stacked_xq, all_losses, all_indices
 
         mean_losses = torch.stack(all_losses).mean() if all_losses and hasattr(torch, "stack") else (
             torch.tensor(0.0, device=x.device) if hasattr(torch, "tensor") and hasattr(x, "device") else 0.0
         )
-        all_indices = torch.stack(all_indices, dim=-1) if hasattr(torch, "stack") else all_indices
 
         if return_lengths:
             res_lengths = dyn_lengths if online_residual else lengths

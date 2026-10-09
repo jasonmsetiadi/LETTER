@@ -1,7 +1,9 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn.init import xavier_normal_
 from sklearn.cluster import KMeans
+
 
 
 class MLPLayers(nn.Module):
@@ -39,6 +41,36 @@ class MLPLayers(nn.Module):
 
     def forward(self, input_feature):
         return self.mlp_layers(input_feature)
+
+
+class StopPredictor(nn.Module):
+    """
+    Phase 2 learned stopping decision head.
+    Predicts a categorical distribution q(L | x) over lengths 1..max_depth.
+    """
+    def __init__(self, in_dim, max_depth, hidden_dim=128, dropout=0.0):
+        super(StopPredictor, self).__init__()
+        self.in_dim = in_dim
+        self.max_depth = max_depth
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(p=dropout),
+            nn.Linear(hidden_dim, max_depth),
+        )
+        self.apply(self.init_weights)
+
+    def init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            xavier_normal_(module.weight.data)
+            if module.bias is not None:
+                module.bias.data.fill_(0.0)
+
+    def forward(self, x):
+        logits = self.net(x)
+        probs = F.softmax(logits, dim=-1)
+        return logits, probs
+
 
 def activation_layer(activation_name="relu", emb_dim=None):
 

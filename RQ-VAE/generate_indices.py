@@ -146,6 +146,12 @@ def get_arg(name, default=None):
         return args.get(name, default)
     return getattr(args, name, default)
 
+ckpt_phase = float(ckpt.get("phase", get_arg("phase", 1.0)))
+if args_setting.phase is not None:
+    phase_mode = float(args_setting.phase)
+else:
+    phase_mode = ckpt_phase
+
 data = EmbDataset(get_arg("data_path"))
 
 model = RQVAE(in_dim=data.dim,
@@ -160,6 +166,10 @@ model = RQVAE(in_dim=data.dim,
                   kmeans_iters=get_arg("kmeans_iters", 100),
                   sk_epsilons=get_arg("sk_epsilons", None),
                   sk_iters=get_arg("sk_iters", 100),
+                  phase=phase_mode,
+                  length_cost=get_arg("length_cost", 0.05),
+                  length_entropy_weight=get_arg("length_entropy_weight", 0.01),
+                  stop_hidden_dim=get_arg("stop_hidden_dim", 128),
                   )
 
 model.load_state_dict(state_dict,strict=False)
@@ -195,14 +205,11 @@ if getattr(model, "beta", 0) > 0:
         centers, label = constrained_km(emb)
         labels[str(idx)] = label
 
-ckpt_phase = float(ckpt.get("phase", get_arg("phase", 1.0)))
-if args_setting.phase is not None:
-    phase_mode = float(args_setting.phase)
-else:
-    phase_mode = ckpt_phase
-
 target_lengths = None
-if phase_mode == 1.5:
+if phase_mode == 2.0:
+    print(f"[Phase 2.0] Model-predicted variable length indices generation.")
+    target_lengths = {}
+elif phase_mode == 1.5:
     if args_setting.target_lengths:
         from truncate_indices import resolve_target_lengths
         target_lengths = resolve_target_lengths(len(data), target_lengths=args_setting.target_lengths)
@@ -244,9 +251,16 @@ current_item = 0
 for d in tqdm(data_loader):
     d, emb_idx = d[0], d[1]
     d = d.to(device)
-    
-    indices = model.get_indices(d, labels, use_sk=False)
-    indices = indices.view(-1, indices.shape[-1]).cpu().numpy()
+
+    if phase_mode == 2.0:
+        indices, pred_lengths = model.get_indices(d, labels, use_sk=False, return_lengths=True)
+        indices = indices.view(-1, indices.shape[-1]).cpu().numpy()
+        pred_lengths_np = pred_lengths.cpu().numpy()
+    else:
+        indices = model.get_indices(d, labels, use_sk=False)
+        indices = indices.view(-1, indices.shape[-1]).cpu().numpy()
+        pred_lengths_np = None
+
     emb_idx_np = emb_idx.cpu().numpy() if hasattr(emb_idx, "cpu") else np.array(emb_idx)
     for j, index in enumerate(indices):
         item_id = int(emb_idx_np[j]) if j < len(emb_idx_np) else current_item
@@ -254,7 +268,11 @@ for d in tqdm(data_loader):
         for i, ind in enumerate(index):
             code.append(prefix[i].format(int(ind)))
 
-        if target_lengths is not None:
+        if phase_mode == 2.0 and pred_lengths_np is not None:
+            k_len = int(pred_lengths_np[j])
+            code = code[:k_len]
+            target_lengths[item_id] = k_len
+        elif target_lengths is not None:
             k_len = int(target_lengths.get(item_id, target_lengths.get(str(item_id), len(code))))
             code = code[:k_len]
 
