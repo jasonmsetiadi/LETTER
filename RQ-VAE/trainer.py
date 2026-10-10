@@ -288,6 +288,7 @@ class Trainer(object):
             "state_dict": self.model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
         }
+        os.makedirs(os.path.dirname(ckpt_path), exist_ok=True)
         torch.save(state, ckpt_path, pickle_protocol=4)
 
         self.logger.info(
@@ -367,5 +368,4 @@ class Trainer(object):
 
 
         return self.best_loss, self.best_collision_rate
-
 
