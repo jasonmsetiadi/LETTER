@@ -16,7 +16,7 @@ Required:
 
 Pipeline & Mode Options:
   --mode MODE                  Pipeline mode: fixed or varlen (default: fixed)
-  --tokenizer TYPE             Tokenizer type: rqvae or letter (default: rqvae)
+  --tokenizer TYPE             Tokenizer type: rqvae, letter, or dvae (default: rqvae)
   --data-root PATH             Dataset directory parent (default: <repo>/data)
   --models LIST                Comma-separated: tiger,lcrec (default: tiger)
   --base-model PATH            Base model for LC-Rec (default: huggyllama/llama-7b)
@@ -223,7 +223,7 @@ if [[ "$PHASE" == "1.5" && "$MODE" != "varlen" ]]; then
   MODE="varlen"
 fi
 
-# Normalize TOKENIZER (must be a single tokenizer: letter or rqvae)
+# Normalize TOKENIZER (must be a single tokenizer: letter, rqvae, or dvae)
 TOKENIZER="$(echo "$TOKENIZER_ARG" | tr -d ' ' | tr '[:upper:]' '[:lower:]')"
 case "$TOKENIZER" in
   letter)
@@ -232,8 +232,11 @@ case "$TOKENIZER" in
   rqvae|rq-vae|vanilla|vanilla_rqvae|vanilla-rqvae)
     TOKENIZER="rqvae"
     ;;
+  dvae|d-vae|varlen_dvae)
+    TOKENIZER="dvae"
+    ;;
   *)
-    printf 'Unknown tokenizer: %s (choose letter or rqvae)\n' "$TOKENIZER_ARG" >&2
+    printf 'Unknown tokenizer: %s (choose letter, rqvae, or dvae)\n' "$TOKENIZER_ARG" >&2
     exit 2
     ;;
 esac
@@ -468,6 +471,21 @@ if [[ "$TOKENIZER" == "letter" ]]; then
   fi
   TOK_SK_ARGS=()
   TOK_NEEDS_CF=true
+elif [[ "$TOKENIZER" == "dvae" ]]; then
+  TOK_NAME="dvae"
+  TOK_LABEL="dVAE"
+  TOK_ALPHA="${USER_ALPHA:-0.0}"
+  TOK_BETA="${USER_BETA:-0.0001}"
+  if [[ "$MODE" == "varlen" ]]; then
+    TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME/varlen"
+  else
+    TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME/fixed"
+  fi
+  TOK_SK_ARGS=()
+  TOK_NEEDS_CF=false
+  if [[ -n "$USER_ALPHA" && "$USER_ALPHA" != "0.0" && "$USER_ALPHA" != "0" ]]; then
+    TOK_NEEDS_CF=true
+  fi
 else
   TOK_NAME="rqvae"
   TOK_LABEL="Vanilla RQ-VAE"
@@ -495,6 +513,56 @@ ensure_tokenizer_checkpoint() {
   fi
 
   local detected_ckpt=""
+  if [[ "$TOK_NAME" == "dvae" ]]; then
+    if [[ "$RESUME" == true && -f "$TOK_CKPT_ROOT/best_loss_model.pth" ]]; then
+      CUR_RQ_CHECKPOINT="$TOK_CKPT_ROOT/best_loss_model.pth"
+      printf '\n[dVAE] [%s] Found existing checkpoint: %s\n' "$TOK_LABEL" "$CUR_RQ_CHECKPOINT"
+      printf '[dVAE] Reusing existing checkpoint.\n'
+      return 0
+    fi
+
+    if [[ ! -f "$EMBEDDING_FILE" ]]; then
+      printf 'Item embeddings not found: %s\nRun preprocess_item_embeddings.sh first.\n' "$EMBEDDING_FILE" >&2
+      exit 1
+    fi
+    if [[ "$TOK_NEEDS_CF" == true && ! -f "$CF_EMBEDDING" ]]; then
+      printf 'Collaborative-filtering embeddings not found: %s\n' "$CF_EMBEDDING" >&2
+      exit 1
+    fi
+
+    printf '\n[dVAE] [%s] Training tokenizer (%s) with maxlen %s...\n' "$TOK_LABEL" "$MODE" "$NUM_LAYERS"
+    local step_start="$SECONDS"
+    mkdir -p "$TOK_CKPT_ROOT"
+    local dvae_train_cmd=(
+      "$PYTHON_BIN" "$REPO_ROOT/dVAE/main.py"
+      --device "$RQ_DEVICE"
+      --data_path "$EMBEDDING_FILE"
+      --dataset "$DATASET"
+      --epochs "$RQ_EPOCHS"
+      --eval_step "$RQ_EVAL_STEP"
+      --ckpt_dir "$TOK_CKPT_ROOT"
+      --maxlen "$NUM_LAYERS"
+    )
+    if [[ "$MODE" == "varlen" ]]; then
+      dvae_train_cmd+=(--varlen)
+    fi
+    if [[ "$TOK_NEEDS_CF" == true && -n "$CF_EMBEDDING" ]]; then
+      dvae_train_cmd+=(--cf_emb "$CF_EMBEDDING" --alpha "$TOK_ALPHA")
+    fi
+
+    "${dvae_train_cmd[@]}"
+
+    CUR_RQ_CHECKPOINT="$TOK_CKPT_ROOT/best_loss_model.pth"
+    if [[ ! -f "$CUR_RQ_CHECKPOINT" ]]; then
+      printf 'dVAE training completed without creating best_loss_model.pth in: %s\n' "$TOK_CKPT_ROOT" >&2
+      exit 1
+    fi
+    printf 'Completed %s training in %s.\n' "$TOK_LABEL" "$(format_duration "$((SECONDS - step_start))")"
+    record_phase "[$TOK_LABEL] Tokenizer training" "$((SECONDS - step_start))"
+    printf 'Stored %s checkpoint: %s\n' "$TOK_LABEL" "$CUR_RQ_CHECKPOINT"
+    return 0
+  fi
+
   if [[ "$RESUME" == true ]]; then
     detected_ckpt="$(find_latest_checkpoint "$TOK_CKPT_ROOT" "$NUM_LAYERS" "$PHASE")"
     if [[ -n "$detected_ckpt" && -f "$detected_ckpt" ]]; then
@@ -579,11 +647,19 @@ generate_fixed_index_file() {
   printf '\n[Index] [%s] Generating fixed-length item index...\n' "$TOK_LABEL"
   local step_start="$SECONDS"
   mkdir -p "$(dirname "$out_file")"
-  "$PYTHON_BIN" "$REPO_ROOT/RQ-VAE/generate_indices.py" \
-    --dataset "$DATASET" \
-    --checkpoint-path "$CUR_RQ_CHECKPOINT" \
-    --output-file "$out_file" \
-    --device "$RQ_DEVICE"
+  if [[ "$TOK_NAME" == "dvae" ]]; then
+    "$PYTHON_BIN" "$REPO_ROOT/dVAE/generate_indices.py" \
+      --dataset "$DATASET" \
+      --checkpoint-path "$CUR_RQ_CHECKPOINT" \
+      --output-file "$out_file" \
+      --device "$RQ_DEVICE"
+  else
+    "$PYTHON_BIN" "$REPO_ROOT/RQ-VAE/generate_indices.py" \
+      --dataset "$DATASET" \
+      --checkpoint-path "$CUR_RQ_CHECKPOINT" \
+      --output-file "$out_file" \
+      --device "$RQ_DEVICE"
+  fi
 
   if [[ ! -f "$out_file" ]]; then
     printf 'Index generation completed without creating: %s\n' "$out_file" >&2
@@ -621,6 +697,28 @@ generate_varlen_index_phase1_5() {
   record_phase "[$TOK_LABEL] Phase 1.5 variable index generation" "$((SECONDS - step_start))"
   printf 'Stored Phase 1.5 variable-length item index: %s\n' "$out_file"
   printf 'Stored Phase 1.5 variable-length index summary: %s\n' "${out_file%.json}.summary.json"
+}
+
+generate_varlen_index_dvae() {
+  local out_file="$1"
+  ensure_tokenizer_checkpoint
+  printf '\n[Index] [%s] Generating dVAE variable-length item index...\n' "$TOK_LABEL"
+  local step_start="$SECONDS"
+  mkdir -p "$(dirname "$out_file")"
+  "$PYTHON_BIN" "$REPO_ROOT/dVAE/generate_indices.py" \
+    --dataset "$DATASET" \
+    --checkpoint-path "$CUR_RQ_CHECKPOINT" \
+    --output-file "$out_file" \
+    --device "$RQ_DEVICE"
+
+  if [[ ! -f "$out_file" ]]; then
+    printf 'dVAE variable index generation completed without creating: %s\n' "$out_file" >&2
+    exit 1
+  fi
+  printf 'Completed %s variable index generation in %s.\n' "$TOK_LABEL" "$(format_duration "$((SECONDS - step_start))")"
+  record_phase "[$TOK_LABEL] dVAE variable index generation" "$((SECONDS - step_start))"
+  printf 'Stored dVAE variable-length item index: %s\n' "$out_file"
+  printf 'Stored dVAE variable-length index summary: %s\n' "${out_file%.json}.summary.json"
 }
 
 # =========================================================================
@@ -665,7 +763,9 @@ else
     VAR_TAG=".min${MIN_LENGTH}-max${MAX_LENGTH}"
   fi
 
-  if [[ "$PHASE" == "1.5" ]]; then
+  if [[ "$TOK_NAME" == "dvae" ]]; then
+    DEF_VAR_NAME="$DATASET.index.dvae.varlen${VAR_TAG}.json"
+  elif [[ "$PHASE" == "1.5" ]]; then
     DEF_VAR_NAME="$DATASET.index.varlen${STRAT_SUFFIX}-phase1.5${VAR_TAG}.json"
   else
     DEF_VAR_NAME="$DATASET.index.varlen${STRAT_SUFFIX}${VAR_TAG}.json"
@@ -674,7 +774,14 @@ else
   TARGET_INDEX_FILE="$TOK_INDEX_DIR/$DEF_VAR_NAME"
   TARGET_INDEX_ARG="$TOK_NAME/$DEF_VAR_NAME"
 
-  if [[ "$PHASE" == "1.5" ]]; then
+  if [[ "$TOK_NAME" == "dvae" ]]; then
+    if [[ "$RESUME" == true && -f "$TARGET_INDEX_FILE" ]]; then
+      printf '\n[Variable index] [%s] Found existing dVAE variable index: %s\n' "$TOK_LABEL" "$TARGET_INDEX_FILE"
+      printf '[Variable index] Reusing existing index.\n'
+    else
+      generate_varlen_index_dvae "$TARGET_INDEX_FILE"
+    fi
+  elif [[ "$PHASE" == "1.5" ]]; then
     # Phase 1.5: Direct length-aware generation
     if [[ "$RESUME" == true && -f "$TARGET_INDEX_FILE" ]]; then
       printf '\n[Variable index] [%s] [Phase 1.5] Found existing index: %s\n' "$TOK_LABEL" "$TARGET_INDEX_FILE"
