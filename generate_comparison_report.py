@@ -679,9 +679,9 @@ def generate_rate_distortion_plot(
             p_status = v.get("pareto_status", "")
             c = get_color(strat)
 
-            marker = "*" if v_ph == "1.5" else "s"
-            size = 140 if v_ph == "1.5" else 90
-            alpha = 0.95 if v_ph == "1.5" else 0.85
+            marker = "*" if v_ph == "1.5" else ("^" if v_ph == "2" else "s")
+            size = 140 if v_ph == "1.5" else (125 if v_ph == "2" else 90)
+            alpha = 0.95 if v_ph in ("1.5", "2") else 0.85
             label_tag = strat if phase else (f"{strat} (P{v_ph})" if v_ph not in ("fixed", "-", "") else strat)
 
             ax.scatter(x, y, color=c, marker=marker, s=size, alpha=alpha,
@@ -1005,7 +1005,7 @@ def generate_report_for_max_length(
     generated_plots = {}
     all_plot_files = []
     if not args.no_plot:
-        p_val = target_phase if target_phase in ("1", "1.5") else None
+        p_val = target_phase if target_phase in ("1", "1.5", "2") else None
         p_sfx = f"_phase{p_val}" if p_val else ""
 
         # Rate-Distortion Pareto Frontier plot
