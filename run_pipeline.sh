@@ -20,7 +20,7 @@ Pipeline & Mode Options:
   --data-root PATH             Dataset directory parent (default: <repo>/data)
   --models LIST                Comma-separated: tiger,lcrec (default: tiger)
   --base-model PATH            Base model for LC-Rec (default: huggyllama/llama-7b)
-  --phase PHASE                Training phase: 1 (fixed-length training, Phase 1) or 1.5 (length-aware item-dependent training, Phase 1.5, default: 1)
+  --phase PHASE                Training phase: 1 (fixed-length training, Phase 1), 1.5 (length-aware item-dependent training, Phase 1.5), or 2 (native variable-length training, Phase 2, default: 1)
   --target-lengths PATH        Target lengths JSON or index file override for Phase 1.5
   --tokenizer-only             Stop after index generation (skip downstream recommenders)
   --resume                     Check and reuse existing checkpoints/indices at each stage (default: false, runs from scratch)
@@ -35,6 +35,9 @@ RQ-VAE / Tokenizer Options:
   --beta VALUE                 Diversity-loss weight (default: 0.0001 for letter, 0.0 for rqvae)
   --num-layers COUNT           Number of RQ-VAE codebook layers / SID length (default: 4 or max-length)
   --num-emb-list LIST          Explicit codebook sizes (e.g. "256 256 256 256")
+  --length-cost VALUE          Expected length penalty (gamma) for Phase 2 / dVAE (default: 0.05)
+  --length-entropy-weight VAL  Entropy regularization weight for Phase 2 RQ-VAE/LETTER (default: 0.01)
+  --stop-hidden-dim COUNT      Hidden dimension for Phase 2 stop predictor (default: 128)
 
 Index Generation & Variable-Length Options:
   --min-length COUNT           Minimum SID length for varlen (default: 1)
@@ -102,6 +105,9 @@ USER_ALPHA=""
 USER_BETA=""
 USER_NUM_LAYERS=""
 USER_NUM_EMB_LIST=""
+LENGTH_COST="0.05"
+LENGTH_ENTROPY_WEIGHT="0.01"
+STOP_HIDDEN_DIM="128"
 MIN_LENGTH="1"
 MAX_LENGTH="4"
 STRATEGY="shortest_unique"
@@ -138,6 +144,9 @@ while [[ $# -gt 0 ]]; do
     --beta) USER_BETA="$2"; shift 2 ;;
     --num-layers) USER_NUM_LAYERS="$2"; shift 2 ;;
     --num-emb-list) USER_NUM_EMB_LIST="$2"; shift 2 ;;
+    --length-cost|--length_cost) LENGTH_COST="$2"; shift 2 ;;
+    --length-entropy-weight|--length_entropy_weight) LENGTH_ENTROPY_WEIGHT="$2"; shift 2 ;;
+    --stop-hidden-dim|--stop_hidden_dim) STOP_HIDDEN_DIM="$2"; shift 2 ;;
     --min-length) MIN_LENGTH="$2"; shift 2 ;;
     --max-length) MAX_LENGTH="$2"; shift 2 ;;
     --strategy) STRATEGY="$2"; shift 2 ;;
@@ -193,8 +202,11 @@ case "$PHASE" in
   1.5)
     PHASE="1.5"
     ;;
+  2|2.0)
+    PHASE="2"
+    ;;
   *)
-    printf 'Unknown phase: %s (choose 1 or 1.5)\n' "$PHASE" >&2
+    printf 'Unknown phase: %s (choose 1, 1.5, or 2)\n' "$PHASE" >&2
     exit 2
     ;;
 esac
@@ -220,6 +232,9 @@ esac
 
 if [[ "$PHASE" == "1.5" && "$MODE" != "varlen" ]]; then
   printf 'Phase 1.5 performs length-aware variable-length training; setting --mode to varlen.\n'
+  MODE="varlen"
+elif [[ "$PHASE" == "2" && "$MODE" != "varlen" ]]; then
+  printf 'Phase 2 performs native variable-length training; setting --mode to varlen.\n'
   MODE="varlen"
 fi
 
@@ -284,10 +299,10 @@ if [[ "$MODE" == "varlen" && "$NUM_LAYERS" -lt "$MAX_LENGTH" ]]; then
   exit 2
 fi
 
-# Resolve varlen truncation strategy settings
+# Resolve varlen truncation strategy settings (only for Phase 1 and Phase 1.5; Phase 2 and dVAE learn stopping natively)
 STRAT_SUFFIX=""
 STRAT_TAG=""
-if [[ "$MODE" == "varlen" ]]; then
+if [[ "$MODE" == "varlen" && "$PHASE" != "2" && "$TOKENIZER" != "dvae" ]]; then
   if [[ "$STRATEGY" == *:* ]]; then
     COLLAB_SIGNAL="${STRATEGY#*:}"
     STRATEGY="${STRATEGY%%:*}"
@@ -464,7 +479,9 @@ if [[ "$TOKENIZER" == "letter" ]]; then
   TOK_LABEL="LETTER"
   TOK_ALPHA="${USER_ALPHA:-0.01}"
   TOK_BETA="${USER_BETA:-0.0001}"
-  if [[ "$PHASE" == "1.5" ]]; then
+  if [[ "$PHASE" == "2" ]]; then
+    TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME/phase2"
+  elif [[ "$PHASE" == "1.5" ]]; then
     TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME/phase1.5${STRAT_TAG}"
   else
     TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME"
@@ -491,7 +508,9 @@ else
   TOK_LABEL="Vanilla RQ-VAE"
   TOK_ALPHA="${USER_ALPHA:-0.0}"
   TOK_BETA="${USER_BETA:-0.0}"
-  if [[ "$PHASE" == "1.5" ]]; then
+  if [[ "$PHASE" == "2" ]]; then
+    TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME/phase2"
+  elif [[ "$PHASE" == "1.5" ]]; then
     TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME/phase1.5${STRAT_TAG}"
   else
     TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME"
@@ -544,7 +563,7 @@ ensure_tokenizer_checkpoint() {
       --maxlen "$NUM_LAYERS"
     )
     if [[ "$MODE" == "varlen" ]]; then
-      dvae_train_cmd+=(--varlen)
+      dvae_train_cmd+=(--varlen --length_cost "$LENGTH_COST")
     fi
     if [[ "$TOK_NEEDS_CF" == true && -n "$CF_EMBEDDING" ]]; then
       dvae_train_cmd+=(--cf_emb "$CF_EMBEDDING" --alpha "$TOK_ALPHA")
@@ -602,7 +621,14 @@ ensure_tokenizer_checkpoint() {
   if [[ "${#TOK_SK_ARGS[@]}" -gt 0 ]]; then
     rq_train_cmd+=("${TOK_SK_ARGS[@]}")
   fi
-  if [[ "$PHASE" == "1.5" ]]; then
+  if [[ "$PHASE" == "2" ]]; then
+    rq_train_cmd+=(
+      --phase 2.0
+      --length_cost "$LENGTH_COST"
+      --length_entropy_weight "$LENGTH_ENTROPY_WEIGHT"
+      --stop_hidden_dim "$STOP_HIDDEN_DIM"
+    )
+  elif [[ "$PHASE" == "1.5" ]]; then
     rq_train_cmd+=(
       --phase 1.5
       --target_length_strategy "$STRATEGY"
@@ -699,6 +725,32 @@ generate_varlen_index_phase1_5() {
   printf 'Stored Phase 1.5 variable-length index summary: %s\n' "${out_file%.json}.summary.json"
 }
 
+generate_varlen_index_phase2() {
+  local out_file="$1"
+  ensure_tokenizer_checkpoint
+  printf '\n[Index] [%s] Generating Phase 2 variable-length item index...\n' "$TOK_LABEL"
+  local step_start="$SECONDS"
+  mkdir -p "$(dirname "$out_file")"
+  local gen_cmd=(
+    "$PYTHON_BIN" "$REPO_ROOT/RQ-VAE/generate_indices.py"
+    --dataset "$DATASET"
+    --checkpoint-path "$CUR_RQ_CHECKPOINT"
+    --output-file "$out_file"
+    --device "$RQ_DEVICE"
+    --phase 2.0
+  )
+  "${gen_cmd[@]}"
+
+  if [[ ! -f "$out_file" ]]; then
+    printf 'Phase 2 index generation completed without creating: %s\n' "$out_file" >&2
+    exit 1
+  fi
+  printf 'Completed %s Phase 2 variable index generation in %s.\n' "$TOK_LABEL" "$(format_duration "$((SECONDS - step_start))")"
+  record_phase "[$TOK_LABEL] Phase 2 variable index generation" "$((SECONDS - step_start))"
+  printf 'Stored Phase 2 variable-length item index: %s\n' "$out_file"
+  printf 'Stored Phase 2 variable-length index summary: %s\n' "${out_file%.json}.summary.json"
+}
+
 generate_varlen_index_dvae() {
   local out_file="$1"
   ensure_tokenizer_checkpoint
@@ -765,6 +817,8 @@ else
 
   if [[ "$TOK_NAME" == "dvae" ]]; then
     DEF_VAR_NAME="$DATASET.index.dvae.varlen${VAR_TAG}.json"
+  elif [[ "$PHASE" == "2" ]]; then
+    DEF_VAR_NAME="$DATASET.index.varlen-phase2${VAR_TAG}.json"
   elif [[ "$PHASE" == "1.5" ]]; then
     DEF_VAR_NAME="$DATASET.index.varlen${STRAT_SUFFIX}-phase1.5${VAR_TAG}.json"
   else
@@ -780,6 +834,14 @@ else
       printf '[Variable index] Reusing existing index.\n'
     else
       generate_varlen_index_dvae "$TARGET_INDEX_FILE"
+    fi
+  elif [[ "$PHASE" == "2" ]]; then
+    # Phase 2: Native learned variable-length generation
+    if [[ "$RESUME" == true && -f "$TARGET_INDEX_FILE" ]]; then
+      printf '\n[Variable index] [%s] [Phase 2] Found existing index: %s\n' "$TOK_LABEL" "$TARGET_INDEX_FILE"
+      printf '[Variable index] Reusing existing index.\n'
+    else
+      generate_varlen_index_phase2 "$TARGET_INDEX_FILE"
     fi
   elif [[ "$PHASE" == "1.5" ]]; then
     # Phase 1.5: Direct length-aware generation
@@ -900,7 +962,10 @@ except Exception:
   # Downstream checkpoint and results paths for varlen
   PHASE_CKPT_TAG=""
   PHASE_RES_TAG=""
-  if [[ "$PHASE" == "1.5" ]]; then
+  if [[ "$PHASE" == "2" && "$TOK_NAME" != "dvae" ]]; then
+    PHASE_CKPT_TAG="-phase2"
+    PHASE_RES_TAG="_phase2"
+  elif [[ "$PHASE" == "1.5" ]]; then
     PHASE_CKPT_TAG="-phase1.5"
     PHASE_RES_TAG="_phase1.5"
   fi
