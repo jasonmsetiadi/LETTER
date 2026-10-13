@@ -43,9 +43,9 @@ def parse_args():
     parser.add_argument(
         "--phase",
         type=str,
-        default="both",
-        choices=["both", "all", "1", "1.5"],
-        help="Training phase to report: 1 (Phase 1 post-hoc), 1.5 (Phase 1.5 length-aware), or both/all (default: both).",
+        default="all",
+        choices=["all", "1", "1.5", "2"],
+        help="Training phase to report: 1 (post-hoc), 1.5 (length-aware), 2 (native learned stopping), or all phases (default: all).",
     )
     parser.add_argument(
         "--models",
@@ -100,7 +100,10 @@ def file_to_strategy(filename, tag=""):
         return (stem, "fixed")
 
     phase = "1"
-    if stem.endswith("_phase1.5") or stem.endswith("-phase1.5"):
+    if stem.endswith("_phase2") or stem.endswith("-phase2"):
+        phase = "2"
+        stem = stem[:-7]
+    elif stem.endswith("_phase1.5") or stem.endswith("-phase1.5"):
         phase = "1.5"
         stem = stem[:-9]
 
@@ -142,7 +145,7 @@ def strategy_to_filename(strat, phase, tag=""):
             return "fixed_L4.json"
     if strat.startswith("fixed_L") and strat[7:].isdigit():
         return f"{strat}.json"
-    phase_str = "_phase1.5" if phase == "1.5" else ""
+    phase_str = "_phase1.5" if phase == "1.5" else ("_phase2" if phase == "2" else "")
     if strat == "shortest_unique":
         return f"varlen{phase_str}{tag}.json"
     if strat == "residual":
@@ -197,7 +200,7 @@ def item_sort_key(item, max_length=4):
     """Sort order for (strategy, phase) items."""
     strat, phase = item if isinstance(item, tuple) else (item, "1")
     base = strategy_sort_key(strat, max_length=max_length)
-    phase_order = 0 if phase in ("fixed", "-") else (1 if phase == "1" else 2)
+    phase_order = 0 if phase in ("fixed", "-") else (1 if phase == "1" else (2 if phase == "1.5" else 3))
     return (base[0], base[1], base[2], strat, phase_order)
 
 
@@ -292,16 +295,8 @@ def autodetect_max_length_and_fixed_depths(
     if explicit_max_length is not None and isinstance(explicit_max_length, str) and explicit_max_length.isdigit():
         explicit_max_length = int(explicit_max_length)
 
-    # 1. Scan result files in report_dir (and parent directory if within dataset)
+    # Scan only the current report directory.
     dirs_to_scan = [report_dir] if report_dir and os.path.isdir(report_dir) else []
-    if report_dir and os.path.isdir(report_dir):
-        parent_dir = os.path.dirname(report_dir)
-        if parent_dir and os.path.basename(parent_dir) == dataset and os.path.isdir(parent_dir):
-            if parent_dir not in dirs_to_scan:
-                dirs_to_scan.append(parent_dir)
-            tok_sibling = os.path.join(parent_dir, tokenizer)
-            if os.path.isdir(tok_sibling) and tok_sibling not in dirs_to_scan:
-                dirs_to_scan.append(tok_sibling)
 
     for sdir in dirs_to_scan:
         for fname in os.listdir(sdir):
@@ -316,26 +311,6 @@ def autodetect_max_length_and_fixed_depths(
                 d = int(m_tag.group(1))
                 discovered_depths.add(d)
                 found_max_tags.add(d)
-
-            # Check experiment_summary files for evaluated depths
-            if fname.startswith("experiment_summary") and (fname.endswith(".md") or fname.endswith(".txt")):
-                try:
-                    with open(os.path.join(sdir, fname), encoding="utf-8") as f:
-                        for line in f:
-                            m_ev = re.search(r"Evaluated Depths.*:([\d\s,]+)", line, re.IGNORECASE)
-                            if m_ev:
-                                for dp in m_ev.group(1).split(","):
-                                    if dp.strip().isdigit():
-                                        discovered_depths.add(int(dp.strip()))
-                            parts = [p.strip().replace("*", "") for p in line.split("|")[1:-1]]
-                            if len(parts) >= 8 and parts[1].lower() == "fixed":
-                                try:
-                                    d_row = int(float(parts[2]))
-                                    discovered_depths.add(d_row)
-                                except Exception:
-                                    pass
-                except Exception:
-                    pass
 
     # 2. Scan dataset index files in data_root/dataset and data_root/dataset/tokenizer
     if data_root and dataset:
@@ -785,6 +760,9 @@ def generate_report_for_max_length(
     if target_phase == "1.5":
         report_json = os.path.join(report_dir, f"strategy_comparison_phase1.5{tag}.json")
         report_md = os.path.join(report_dir, f"strategy_comparison_phase1.5{tag}.md")
+    elif target_phase == "2":
+        report_json = os.path.join(report_dir, f"strategy_comparison_phase2{tag}.json")
+        report_md = os.path.join(report_dir, f"strategy_comparison_phase2{tag}.md")
     elif target_phase == "1":
         report_json = os.path.join(report_dir, f"strategy_comparison{tag}.json")
         report_md = os.path.join(report_dir, f"strategy_comparison{tag}.md")
@@ -798,12 +776,6 @@ def generate_report_for_max_length(
             res = file_to_strategy(fname, tag)
             if res and res not in discovered_items:
                 discovered_items.append(res)
-        if max_length == 4:
-            alt_tag = "" if tag == "_max4" else "_max4"
-            for fname in sorted(os.listdir(report_dir)):
-                res = file_to_strategy(fname, alt_tag)
-                if res and res not in discovered_items:
-                    discovered_items.append(res)
 
     def check_has_index(strat, ph):
         tok_d = os.path.join(data_root, dataset, tokenizer)
@@ -825,7 +797,7 @@ def generate_report_for_max_length(
             }
             strat_sfx = sig_map.get(sig, f".pop-{sig}")
 
-        ph_tag = "-phase1.5" if ph == "1.5" else ""
+        ph_tag = "-phase1.5" if ph == "1.5" else ("-phase2" if ph == "2" else "")
         cands = [
             os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}{ph_tag}{var_t}.json"),
             os.path.join(tok_d, f"{dataset}.index.varlen-{strat.replace(':', '-')}{ph_tag}{var_t}.json"),
@@ -834,10 +806,11 @@ def generate_report_for_max_length(
             os.path.join(tok_d, f"{dataset}.index{strat_sfx}{ph_tag}{var_t}.json"),
             os.path.join(ds_d, f"{dataset}.index{strat_sfx}{ph_tag}{var_t}.json"),
         ]
-        if ph == "1.5":
+        if ph in ("1.5", "2"):
+            ph_file_tag = "_phase1.5" if ph == "1.5" else "_phase2"
             cands.extend([
-                os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}_phase1.5{var_t}.json"),
-                os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}_phase1.5{var_t}.json"),
+                os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}{ph_file_tag}{var_t}.json"),
+                os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}{ph_file_tag}{var_t}.json"),
             ])
         if max_length == 4 and min_length == 1:
             cands.extend([
@@ -846,10 +819,11 @@ def generate_report_for_max_length(
                 os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}{ph_tag}.json"),
                 os.path.join(ds_d, f"{dataset}.index.varlen-{strat.replace(':', '-')}{ph_tag}.json"),
             ])
-            if ph == "1.5":
+            if ph in ("1.5", "2"):
+                ph_file_tag = "_phase1.5" if ph == "1.5" else "_phase2"
                 cands.extend([
-                    os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}_phase1.5.json"),
-                    os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}_phase1.5.json"),
+                    os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}{ph_file_tag}.json"),
+                    os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}{ph_file_tag}.json"),
                 ])
         return any(os.path.isfile(c) for c in cands)
 
@@ -866,6 +840,10 @@ def generate_report_for_max_length(
             return
         if target_phase == "1.5" and s_phase == "1":
             return
+        if target_phase == "2" and s_phase != "2" and s_phase != "fixed":
+            return
+        if target_phase in ("1", "1.5") and s_phase == "2":
+            return
         pair = (norm_s, s_phase)
         if pair not in combined_items:
             combined_items.append(pair)
@@ -878,13 +856,17 @@ def generate_report_for_max_length(
         if s.startswith("fixed_L"):
             add_entry(s, "fixed")
             continue
-        if target_phase in ("both", "all", "1"):
+        if target_phase in ("all", "1"):
             add_entry(s, "1")
         if target_phase == "1.5":
             add_entry(s, "1.5")
-        elif target_phase in ("both", "all"):
+        if target_phase == "2":
+            add_entry(s, "2")
+        elif target_phase == "all":
             if (s, "1.5") in discovered_items or check_has_index(s, "1.5"):
                 add_entry(s, "1.5")
+            if (s, "2") in discovered_items or check_has_index(s, "2"):
+                add_entry(s, "2")
 
     for itm in discovered_items:
         add_entry(itm[0], itm[1])
@@ -930,13 +912,6 @@ def generate_report_for_max_length(
     sid_table_data = []
 
     cand_dirs = [report_dir]
-    parent_dir = os.path.dirname(report_dir) if report_dir else None
-    if parent_dir and os.path.isdir(parent_dir) and os.path.basename(parent_dir) == dataset:
-        if parent_dir not in cand_dirs:
-            cand_dirs.append(parent_dir)
-        tok_sibling = os.path.join(parent_dir, tokenizer)
-        if os.path.isdir(tok_sibling) and tok_sibling not in cand_dirs:
-            cand_dirs.append(tok_sibling)
 
     for strat, phase in combined_items:
         res_fname = strategy_to_filename(strat, phase, tag)
@@ -947,38 +922,6 @@ def generate_report_for_max_length(
                 res_file = cand_path
                 break
 
-        if not res_file and max_length == 4:
-            alt_tag = "" if tag == "_max4" else "_max4"
-            alt_fname = strategy_to_filename(strat, phase, alt_tag)
-            if alt_fname:
-                for cdir in cand_dirs:
-                    cand_path = os.path.join(cdir, alt_fname)
-                    if os.path.isfile(cand_path):
-                        res_file = cand_path
-                        break
-
-        if strat == "fixed" and not res_file:
-            for cdir in cand_dirs:
-                for alt_cand in [f"fixed_L{max_length}.json", f"fixed_max{max_length}.json", "fixed.json" if max_length == 4 else None]:
-                    if alt_cand:
-                        cand_path = os.path.join(cdir, alt_cand)
-                        if os.path.isfile(cand_path):
-                            res_file = cand_path
-                            break
-                if res_file:
-                    break
-
-        if strat.startswith("fixed_L") and not res_file:
-            d_str = strat[7:]
-            for cdir in cand_dirs:
-                for alt_cand in [f"fixed_L{d_str}.json", f"fixed_max{d_str}.json", "fixed.json" if d_str == "4" else None]:
-                    if alt_cand:
-                        cand_path = os.path.join(cdir, alt_cand)
-                        if os.path.isfile(cand_path):
-                            res_file = cand_path
-                            break
-                if res_file:
-                    break
 
         metrics = {}
         status = "pending"
@@ -990,19 +933,6 @@ def generate_report_for_max_length(
                 status = "completed"
             except Exception:
                 status = "error"
-
-        if (not metrics or status != "completed") and strat == "fixed":
-            summary_m = find_fixed_metrics_from_summaries(cand_dirs, max_length, dataset)
-            if summary_m:
-                metrics = summary_m
-                status = "completed"
-        elif (not metrics or status != "completed") and strat.startswith("fixed_L"):
-            d_val = int(strat[7:]) if strat[7:].isdigit() else None
-            if d_val is not None:
-                summary_m = find_fixed_metrics_from_summaries(cand_dirs, d_val, dataset)
-                if summary_m:
-                    metrics = summary_m
-                    status = "completed"
 
         sid_metric = sid_results_map.get((strat, phase))
         if not sid_metric and phase in ("fixed", "-"):
@@ -1498,7 +1428,7 @@ def generate_report_for_max_length(
     # 2. MARKDOWN FORMATTING
     # -------------------------------------------------------------
     tok_label = "Vanilla RQ-VAE" if tokenizer == "rqvae" else "LETTER"
-    phase_label = "Phase 1 & Phase 1.5 (All)" if target_phase in ("both", "all") else f"Phase {target_phase}"
+    phase_label = "Phase 1, Phase 1.5 & Phase 2 (All)" if target_phase == "all" else f"Phase {target_phase}"
     md_lines = [
         f"# {tok_label} Strategy Comparison Report: {model_name} ({dataset})\n",
         f"- **Dataset**: `{dataset}`",
@@ -1793,10 +1723,6 @@ def main():
         model_name = "LETTER-TIGER" if model == "tiger" else "LETTER-LC-Rec"
         model_dir = "LETTER-TIGER" if model == "tiger" else "LETTER-LC-Rec"
         report_dir = os.path.join(repo_root, model_dir, "results", dataset, tokenizer)
-        if not os.path.isdir(report_dir) and tokenizer == "letter":
-            legacy_dir = os.path.join(repo_root, model_dir, "results", dataset)
-            if os.path.isdir(legacy_dir) and any(f.endswith(".json") for f in os.listdir(legacy_dir)):
-                report_dir = legacy_dir
         os.makedirs(report_dir, exist_ok=True)
 
         # Auto-detect max_length, tag, and available fixed depths
@@ -1818,13 +1744,6 @@ def main():
                     m_tg = re.search(r"_max(\d+)\.(json|md)$", fname)
                     if m_tg:
                         strat_depths.add(int(m_tg.group(1)))
-            if not strat_depths:
-                parent_dir = os.path.dirname(report_dir) if report_dir else None
-                if parent_dir and os.path.isdir(parent_dir) and os.path.basename(parent_dir) == dataset:
-                    for fname in os.listdir(parent_dir):
-                        m_tg = re.search(r"_max(\d+)\.(json|md)$", fname)
-                        if m_tg:
-                            strat_depths.add(int(m_tg.group(1)))
             target_lengths = sorted(list(strat_depths)) if strat_depths else (detected_depths if detected_depths else [4])
 
         for max_length in sorted(list(set(target_lengths))):
