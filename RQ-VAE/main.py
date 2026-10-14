@@ -41,7 +41,9 @@ def parse_args():
     parser.add_argument('--beta', type=float, default=0.1, help='diversity loss weight')
     parser.add_argument('--n_clusters', type=int, default=10, help='n_clusters')
     parser.add_argument('--sample_strategy', type=str, default="all", help='sample_strategy')
-    parser.add_argument('--cf_emb', type=str, default="./RQ-VAE/ckpt/Instruments-32d-sasrec.pt", help='cf emb')
+    # Do not default to an embedding from a particular dataset.  The caller
+    # must provide the CF representation when CF alignment is enabled.
+    parser.add_argument('--cf_emb', type=str, default=None, help='Path to CF embeddings (.pt or .npy)')
    
     parser.add_argument('--layers', type=int, nargs='+', default=[2048,1024,512,256,128,64], help='hidden sizes of every layer')
 
@@ -87,7 +89,11 @@ if __name__ == '__main__':
 
     print(args)
     cf_emb = None
+    if args.alpha > 0 and not args.cf_emb:
+        raise ValueError("--cf_emb is required when --alpha is greater than zero")
     if args.alpha > 0 and args.cf_emb:
+        if not os.path.isfile(args.cf_emb):
+            raise FileNotFoundError(f"CF embedding file not found: {args.cf_emb}")
         try:
             cf_emb = torch.load(args.cf_emb, weights_only=False).squeeze().detach().numpy()
         except TypeError:
