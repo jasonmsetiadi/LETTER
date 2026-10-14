@@ -93,10 +93,10 @@ class RQVAE(nn.Module):
         min_length=1,
         use_sk=True,
         return_lengths=False,
+        length_mode="argmax",
     ):
         if self.phase == 2.0 and self.stop_predictor is not None:
             x_e = self.encoder(x)
-            stop_logits, stop_probs = self.stop_predictor(x_e)
             stacked_xq, all_losses, indices = self.rq(
                 x_e,
                 labels,
@@ -105,13 +105,14 @@ class RQVAE(nn.Module):
             )
             # stacked_xq: [B, L, e_dim]
             B, L, D = stacked_xq.shape
+            residuals = torch.stack([x_e] + [x_e - stacked_xq[:, l] for l in range(L - 1)], dim=1)
+            length_logits, stop_probs, survival_probs, pred_lengths = self.stop_predictor(
+                residuals, length_mode=length_mode
+            )
+
             flat_xq = stacked_xq.reshape(B * L, D)
             decoded_flat = self.decoder(flat_xq)
             all_recons = decoded_flat.reshape(B, L, -1)  # [B, L, in_dim]
-
-            # survival_probs: P(L >= l) = sum_{j=l}^L q(L=j)
-            survival_probs = torch.flip(torch.cumsum(torch.flip(stop_probs, dims=[1]), dim=1), dims=[1])
-            pred_lengths = torch.argmax(stop_probs, dim=-1) + 1  # 1-indexed
 
             if return_lengths:
                 return all_recons, all_losses, indices, stacked_xq, stop_probs, survival_probs, pred_lengths
@@ -156,18 +157,21 @@ class RQVAE(nn.Module):
         min_length=1,
         use_sk=False,
         return_lengths=False,
+        length_mode="argmax",
     ):
         x_e = self.encoder(xs)
         if self.phase == 2.0 and self.stop_predictor is not None:
-            stop_logits, stop_probs = self.stop_predictor(x_e)
-            pred_lengths = torch.argmax(stop_probs, dim=-1) + 1
-            rq_out = self.rq(
+            stacked_xq, _, indices = self.rq(
                 x_e,
                 labels,
                 use_sk=use_sk,
-                return_prefixes=False,
+                return_prefixes=True,
             )
-            indices = rq_out[2]
+            B, L, D = stacked_xq.shape
+            residuals = torch.stack([x_e] + [x_e - stacked_xq[:, l] for l in range(L - 1)], dim=1)
+            length_logits, stop_probs, survival_probs, pred_lengths = self.stop_predictor(
+                residuals, length_mode=length_mode
+            )
             if return_lengths:
                 return indices, pred_lengths
             return indices
@@ -217,8 +221,17 @@ class RQVAE(nn.Module):
 
         # CF_Loss
         if self.alpha > 0 and self.cf_embedding is not None and not (isinstance(self.cf_embedding, int) and self.cf_embedding == 0):
-            cf_embedding_in_batch = self.cf_embedding[emb_idx]
-            cf_embedding_in_batch = torch.from_numpy(cf_embedding_in_batch).to(dense_out.device)
+            idx = emb_idx.tolist() if isinstance(emb_idx, torch.Tensor) and isinstance(self.cf_embedding, np.ndarray) else emb_idx
+            cf_embedding_in_batch = self.cf_embedding[idx]
+            if isinstance(cf_embedding_in_batch, np.ndarray):
+                try:
+                    cf_embedding_in_batch = torch.from_numpy(cf_embedding_in_batch).to(dense_out.device)
+                except (RuntimeError, UserWarning):
+                    cf_embedding_in_batch = torch.tensor(cf_embedding_in_batch.tolist(), device=dense_out.device)
+            elif not isinstance(cf_embedding_in_batch, torch.Tensor):
+                cf_embedding_in_batch = torch.as_tensor(cf_embedding_in_batch, device=dense_out.device)
+            else:
+                cf_embedding_in_batch = cf_embedding_in_batch.to(dense_out.device)
             cf_loss = self.CF_loss(dense_out, cf_embedding_in_batch)
         else:
             cf_loss = torch.tensor(0.0, device=dense_out.device)
@@ -237,8 +250,11 @@ class RQVAE(nn.Module):
         stop_probs=None,
         survival_probs=None,
     ):
-        # 1. Multi-depth reconstruction loss
-        # all_recons: [B, L, in_dim], xs: [B, in_dim]
+        B, L, _ = all_recons.shape
+        # 1. Multi-depth reconstruction loss with label-smoothed stop probabilities
+        smoothed_stop_probs = 0.9 * stop_probs + 0.1 * (1.0 / float(L))
+        smoothed_alive = stop_probs.flip(dims=(-1,)).cumsum(dim=-1).flip(dims=(-1,))
+
         if self.loss_type == 'mse':
             recon_diff = (all_recons - xs.unsqueeze(1)) ** 2
             recon_per_layer = recon_diff.mean(dim=-1)  # [B, L]
@@ -248,22 +264,30 @@ class RQVAE(nn.Module):
         else:
             raise ValueError('incompatible loss type')
 
-        loss_recon = (stop_probs * recon_per_layer).sum(dim=-1).mean()
+        loss_recon = (smoothed_stop_probs * recon_per_layer).sum(dim=-1).mean()
 
         # 2. Survival-weighted quantization loss
         if isinstance(quant_losses, (list, tuple)):
             layer_losses = torch.stack(quant_losses)  # [L]
         else:
             layer_losses = quant_losses
-        if survival_probs is None:
-            survival_probs = torch.flip(torch.cumsum(torch.flip(stop_probs, dims=[1]), dim=1), dims=[1])
-        mean_survival = survival_probs.mean(dim=0)  # [L]
+        mean_survival = smoothed_alive.mean(dim=0)  # [L]
         loss_quant = (mean_survival * layer_losses).sum()
 
         # 3. Multi-depth Collaborative Alignment Loss (LETTER)
         if self.alpha > 0 and self.cf_embedding is not None and not (isinstance(self.cf_embedding, int) and self.cf_embedding == 0):
-            cf_embedding_in_batch = self.cf_embedding[emb_idx]
-            cf_embedding_in_batch = torch.from_numpy(cf_embedding_in_batch).to(stacked_xq.device)
+            idx = emb_idx.tolist() if isinstance(emb_idx, torch.Tensor) and isinstance(self.cf_embedding, np.ndarray) else emb_idx
+            cf_embedding_in_batch = self.cf_embedding[idx]
+            if isinstance(cf_embedding_in_batch, np.ndarray):
+                try:
+                    cf_embedding_in_batch = torch.from_numpy(cf_embedding_in_batch).to(stacked_xq.device)
+                except (RuntimeError, UserWarning):
+                    cf_embedding_in_batch = torch.tensor(cf_embedding_in_batch.tolist(), device=stacked_xq.device)
+            elif not isinstance(cf_embedding_in_batch, torch.Tensor):
+                cf_embedding_in_batch = torch.as_tensor(cf_embedding_in_batch, device=stacked_xq.device)
+            else:
+                cf_embedding_in_batch = cf_embedding_in_batch.to(stacked_xq.device)
+
             cf_losses = []
             for l in range(stacked_xq.shape[1]):
                 cf_losses.append(self.CF_loss(stacked_xq[:, l], cf_embedding_in_batch))
@@ -274,11 +298,10 @@ class RQVAE(nn.Module):
             cf_loss = torch.tensor(0.0, device=stacked_xq.device)
 
         # 4. Rate Penalty (Expected Length) & Entropy Regularization
-        L = stop_probs.shape[1]
-        depths = torch.arange(1, L + 1, device=stacked_xq.device, dtype=torch.float32)
-        expected_lengths = (stop_probs * depths).sum(dim=-1)  # [B]
+        depths = torch.arange(1, L + 1, device=stacked_xq.device, dtype=stop_probs.dtype)
+        expected_lengths = (stop_probs * depths.unsqueeze(0)).sum(dim=-1)  # [B]
         mean_expected_len = expected_lengths.mean()
-        entropy = -(stop_probs * torch.log(stop_probs + 1e-9)).sum(dim=-1).mean()
+        entropy = -(stop_probs * torch.log(stop_probs.clamp(min=1e-12))).sum(dim=-1).mean()
         rate_loss = self.length_cost * mean_expected_len - self.length_entropy_weight * entropy
 
         total_loss = loss_recon + self.quant_loss_weight * loss_quant + self.alpha * cf_loss + rate_loss

@@ -29,8 +29,8 @@ The research evolves across four phases:
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │ PHASE 2: Native Variable Quantization (Learned stop decision)                          │
 │  - Stop decision is optimized by gradient against fidelity and rate                    │
-│  - 4 Design Families: Matryoshka RQ-VAE, Learned Dynamic Halting (ACT),                │
-│    Rate-Distortion VQ (EC-RQ-VAE), and Asymmetric Tree-Structured VQ (Tree-VQ)         │
+│  - Learn a native variable-length quantizer with prefix-aware supervision and a        │
+│    differentiable stopping objective                                                     │
 │  - Primary Goal: Eliminate the intermediate code gap; make short prefixes high-fidelity│
 └──────────────────────────────────────────┬─────────────────────────────────────────────┘
                                            ▼
@@ -128,7 +128,7 @@ The surveyed papers also disagree on direction. VarLenRec gives popular items sh
 
 ### Limitations of Phase 1.5
 1. **Untrained stop decision**: The stop signal gets no reconstruction gradient. A badly set threshold cannot be corrected by training.
-2. **Single-depth supervision**: Each item is supervised at one stopping depth, not at all prefixes as in Matryoshka (Family A) or dVAE.
+2. **Single-depth supervision**: Each item is supervised at one stopping depth, not at all possible prefixes.
 3. **Collaborative alignment**: $\mathcal{L}_{\text{CF}}$ is absent at truncated depths in all surveyed papers unless explicitly added at $k(x)$.
 4. **Partial conditioning**: Some designs condition only part of the loss on length (e.g., VarLenRec supervises reconstruction at the target length but sums the quantization loss over all $K$ layers).
 
@@ -149,173 +149,9 @@ The following classifications follow each paper's equations and have not been ch
 
 ---
 
-## 3. Phase 2: Native Variable-Length Quantization (The Quantizer Design Space)
+## 3. Phase 2: Native Variable-Length Quantization
 
-In Phase 2, the length mechanism is part of the model: the stop decision is optimized by gradient against reconstruction fidelity and a rate (length) term, and the quantizer is supervised at every prefix it may be truncated to. Rather than relying on a single concept, Phase 2 encompasses **four distinct architectural families**:
-
-> **Note on Family A.** Matryoshka supervision satisfies test (a) at all depths, but on its own it does not train a stop decision (the comparison table lists "multi-depth supervision + threshold"). Family A is therefore Phase 2 on the supervision axis and Phase 1.5 on the stop axis unless it is paired with a learned stop mechanism (Family B or C), or with a threshold calibrated on the multi-depth losses.
-
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                        PHASE 2 QUANTIZER DESIGN SPACE                                  │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ Family A: Matryoshka / Multi-Scale RQ-VAE (Nested Supervision)                         │
-│           - Standard cascade, but supervises all prefix depths l in {1..L} simultaneously│
-│                                                                                        │
-│ Family B: Learned Dynamic Halting / ACT-RQ-VAE (Self-Terminating Quantizer)            │
-│           - Gated halting mechanism decides item length end-to-end via rate penalty     │
-│                                                                                        │
-│ Family C: Rate-Distortion & Entropy-Constrained Quantization (EC-RQ-VAE)               │
-│           - Information-theoretic Lagrangian: Loss = Distortion + lambda * CodeLength  │
-│                                                                                        │
-│ Family D: Asymmetric Tree-Structured VQ (Tree-VQ)                                      │
-│           - Non-uniform codebook tree where leaf nodes naturally terminate at depths 1..L│
-└────────────────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-### Family A: Matryoshka RQ-VAE (Multi-Depth Supervision)
-*(Inspired by Matryoshka Representation Learning, NeurIPS 2022)*
-
-```
-                  Phase 2: Matryoshka RQ-VAE (M-RQ-VAE)
-                               x (Item Embedding)
-                                       │
-                                   [Encoder]
-                                       │
-                                       v
-                                   [RQ Layers]
-                     Level 1            Level 2            Level 4
-                    (z1 only)          (z1 + z2)     (z1 + z2 + z3 + z4)
-                        │                  │                  │
-                    [Decoder]          [Decoder]          [Decoder]
-                        │                  │                  │
-                    ▼   ▼   ▼          ▼   ▼   ▼          ▼   ▼   ▼
-                  L_recon(1)         L_recon(2)         L_recon(4)
-                  + L_CF(1)          + L_CF(2)          + L_CF(4)
-```
-
-#### Variant A.1: Deterministic Multi-Depth Joint Loss (Base M-RQ-VAE)
-*(Inspired by Matryoshka Representation Learning, NeurIPS 2022)*
-
-Instead of computing losses at depth $L$ alone, the total training objective is a weighted multi-depth sum across all prefix depths $l \in \{1, \dots, L\}$:
-
-$$\mathcal{L}_{\text{total}} = \sum_{l=1}^L w_l \cdot \Big[ \underbrace{\|x - \text{Decoder}(\hat{x}_l)\|_2^2}_{\text{Multi-Depth Reconstruction Loss}} + \alpha \cdot \underbrace{\mathcal{L}_{\text{CF}}(\hat{x}_l, e_{\text{CF}})}_{\text{Multi-Depth Collaborative Loss}} \Big] + \beta \mathcal{L}_{\text{commit}}$$
-
-where $\hat{x}_l = \sum_{j=1}^l z_j$, and $w_l$ are depth-importance weights (e.g. $w_l = 1.0$ or exponentially decaying).
-
-- **Theoretical Advantage**: Layer 1 captures coarse semantic categories, Layer 2 captures sub-categories, and Layers 3–4 capture fine residuals. Crucially, $\mathcal{L}_{\text{CF}}(\hat{x}_l)$ is applied at **every depth** so an item truncated to length 2 retains direct collaborative alignment.
-
----
-
-#### Variant A.2: Stochastic Prefix-Dropout (Truncation-Aware Training)
-During forward training passes, the quantizer stochastically samples a dynamic quantization depth $l \sim \mathcal{P}(\{1, \dots, L\})$ per batch:
-- With probability $p_1$: stop after 1 layer.
-- With probability $p_2$: stop after 2 layers.
-- With probability $p_L$: proceed to all $L$ layers.
-
-The decoder reconstructs $x$ using only the sampled prefix $\hat{x}_l$.
-
-- **Theoretical Advantage**: Prevents deeper codebook layers from acting as an "information crutch" for shallow layers, regularizing the codebook so any prefix $c_{1:l}$ is robust on its own.
-
----
-
-#### Variant A.3: Frequency-Gated Quantization Loss
-To bridge Huffman coding directly into the quantizer loss, the loss at depth $l$ for item $i$ is weighted by empirical frequency $f_i$:
-
-$$\mathcal{L}(i) = \sum_{l=1}^L \gamma_l(f_i) \cdot \Big( \|x_i - \text{Decoder}(\hat{x}_l)\|^2 + \alpha \mathcal{L}_{\text{CF}}(\hat{x}_l, e_{\text{CF}}^{(i)}) \Big)$$
-
-- **For popular items**: $\gamma_1(f_i)$ and $\gamma_2(f_i)$ are scaled up, forcing low reconstruction and high CF alignment for head items at shallow layers.
-- **For rare items**: $\gamma_4(f_i)$ is prioritized, ensuring full 4-layer convergence for the long tail.
-*(Note: This variant also serves as the conceptual bridge to Family C: Rate-Distortion Quantization).*
-
----
-
-### Family B: Learned Dynamic Halting (ACT-RQ-VAE / Ponder-Quantizer)
-*(Inspired by Adaptive Computation Time and PonderNet)*
-
-Rather than assigning lengths by static heuristics (popularity quantiles or arbitrary error thresholds), the quantizer **learns when to stop quantizing autonomously**.
-
-```
-                   Family B: Dynamic Halting Architecture
-                        x (Item Embedding) ──> [Encoder]
-                                                   │
-  ┌────────────────────────────────────────────────┴───────────────────────────────┐
-  │                                                                                │
-  ▼                                                                                ▼
-[Layer 1: z1] ──> [Halting Unit h1] ──(h1 >= 1-eps)──> EMIT <eos_id> (Length = 1)
-       │                  │
-       ▼ (1 - h1)         ▼
-[Layer 2: z2] ──> [Halting Unit h2] ──(h1+h2 >= 1-eps)─> EMIT <eos_id> (Length = 2)
-       │                  │
-       ▼ (1 - h1 - h2)    ▼
-[Layer 3: z3] ──> [Halting Unit h3] ──...
-```
-
-- **Mechanism**: After each quantizer layer $l$, a lightweight halting gate outputs a scalar halting probability $h_l \in [0, 1]$:
-  $$h_l = \sigma\left(W_h [z_l \,\|\, r_l] + b_h\right)$$
-  where $r_l = x - \hat{x}_{l-1}$ is the current residual.
-- **Objective with Parsimony Penalty**:
-  $$\mathcal{L} = \sum_{l=1}^L p_l \Big( \|x - \text{Decoder}(\hat{x}_l)\|^2 + \alpha \mathcal{L}_{\text{CF}}(\hat{x}_l) \Big) + \lambda_{\text{rate}} \cdot \mathbb{E}[N_{\text{steps}}(x)]$$
-  where $p_l$ is the halting distribution and $\mathbb{E}[N_{\text{steps}}]$ is the expected token length.
-- **Key Advantage**: The network naturally learns the optimal rate-distortion trade-off: semantically distinct/simple items stop after 1 or 2 tokens, while complex/densely packed items continue to 4 tokens.
-- **Reference implementation (dVAE, Khrylchenko 2026)**: The closest existing instance of Families B and C. A per-step stop probability induces $q(L)$, reconstruction is weighted over all prefixes by $q(L=l)$, and the rate term is $\lambda\,\mathbb{E}[L] - H(q(L))$, all differentiable with no REINFORCE. It uses a shared vocabulary across positions and a causal transformer decoder, so it is **not** a drop-in replacement for standard RQ-VAE. It has no $\mathcal{L}_{\text{CF}}$ at any depth.
-
----
-
-### Family C: Rate-Distortion & Entropy-Constrained VQ (EC-RQ-VAE)
-*(Derived from Information-Theoretic Entropy-Constrained Vector Quantization, Chou et al.)*
-
-In classical source coding, the optimal code length of an item $i$ is proportional to its self-information $-\log P(i)$. EC-RQ-VAE embeds this principle directly into the continuous optimization objective:
-
-$$\min_{\theta, \mathcal{C}} \mathbb{E}_{x \sim \mathcal{D}} \Big[ \underbrace{\mathcal{D}(x, \hat{x}_{l(x)})}_{\text{Distortion: Reconstruction + CF}} + \lambda \cdot \underbrace{\mathcal{R}(l(x), f_x)}_{\text{Rate Penalty: Expected Decoding Cost}} \Big]$$
-
-- **Rate Formulations**:
-  1. *Interaction-Weighted Token Cost*: $\mathcal{R} = l(x) \cdot \frac{f_x}{\sum_j f_j}$ (penalizes long IDs heavily if the item is frequently accessed by users).
-  2. *Codebook Shannon Entropy*: $\mathcal{R} = -\sum_{c \in \mathcal{C}} P(c) \log P(c)$ (encourages high-probability semantic clusters to be shallow).
-- **Key Advantage**: Directly unifies Huffman coding theory and neural vector quantization into a single Lagrangian multiplier objective.
-- **Open gap**: No surveyed paper has tried an item-weighted rate term $\lambda \cdot f_x \cdot \mathbb{E}[L]$ inside a learned fidelity-based halting rule. dVAE uses a uniform $\lambda$ and VarLenRec uses popularity labels without any learned halting. Combining the two is a candidate contribution.
-
----
-
-### Family D: Asymmetric Tree-Structured VQ (Tree-VQ)
-
-Standard RQ-VAE uses a rigid Cartesian product of $L$ flat codebooks: $\mathcal{C}_1 \times \mathcal{C}_2 \times \dots \times \mathcal{C}_L$ (a uniform tree where every branch has depth $L$).
-
-Tree-VQ replaces this with an **inherently asymmetric hierarchical tree codebook**:
-
-```
-                        Family D: Tree-VQ Codebook
-                                   Root
-                                  /    \
-                              Node A   Node B
-                              /   \       \
-                           A1     A2    (Item 5: Leaf, Depth 2)
-                          /  \     \
-                      Item 1 Item 2 (Item 3: Leaf, Depth 3)
-                     (Depth 4)
-```
-
-- **Mechanism**:
-  - Codebook nodes at depth 2 or 3 can be designated as **terminal leaves** (representing a finished item ID).
-  - Dense semantic regions branch 4 levels deep to prevent collisions.
-  - Distinct or isolated semantic regions terminate at depth 1 or 2.
-- **Key Advantage**: The tree topology itself dictates item length. There are no redundant codebook parameters, and every path from root to leaf is guaranteed to be unique and valid.
-
----
-
-### Comparison of Phase 2 Architectural Families
-
-| Dimension | Family A: Matryoshka (M-RQ-VAE) | Family B: Dynamic Halting (ACT) | Family C: Rate-Distortion (EC-RQ) | Family D: Tree-Structured VQ |
-| :--- | :--- | :--- | :--- | :--- |
-| **Length Decision** | Multi-depth supervision + threshold | Learned gating unit $h_l$ | Lagrangian rate penalty $\lambda \mathcal{R}$ | Tree topology (leaf depth) |
-| **CF Loss ($\mathcal{L}_{\text{CF}}$)** | Explicit at all depths | Weighted by halting prob $p_l$ | Scaled by rate term | Evaluated at leaf nodes |
-| **Downstream Compatibility** | Drop-in replacement for standard RQ-VAE | Replaces the RQ-VAE quantizer; halting gate and rate term are added (the dVAE reference also changes the decoder and token embeddings) | Depends on the rate formulation | Requires tree-routing encoder |
-| **Primary Strength** | Simple, highly stable training | End-to-end learned lengths | Strong information-theory basis | Zero collision redundancy |
-
-### Out of Scope: Parallel-Slot Designs
-Designs without residual levels, such as ADA-SID (parallel shared/text/vision/behavior experts with separate codebooks and a ReLU-gated behavioral router), have no prefix structure, so none of Phases 1 to 3 applies cleanly. Dropped slots become padding tokens, so the sequence may not shorten. Its popularity-gated alignment weight is still relevant to Variant A.3 (frequency-gated loss).
+In Phase 2, the length mechanism is part of the model: the stop decision is optimized by gradient against reconstruction fidelity and a rate (length) term, and the quantizer is supervised at every prefix it may be truncated to.
 
 ---
 
@@ -407,7 +243,7 @@ Co-designing the decoder with variable-length IDs yields:
 
 | Dimension | Phase 1: Post-Hoc Truncation | Phase 2: Native Quantization (M-RQ-VAE) | Phase 3: Decoder Co-Design |
 | :--- | :--- | :--- | :--- |
-| **Quantizer Type** | Standard RQ-VAE (frozen) | Matryoshka RQ-VAE (M-RQ-VAE) | M-RQ-VAE + Adaptive Trie |
+| **Quantizer Type** | Standard RQ-VAE (frozen) | Native variable-length quantizer | Native variable-length quantizer + Adaptive Trie |
 | **Intermediate Representation Quality** | Sub-optimal (not trained to stand alone) | **Optimal** (explicitly trained at all depths) | Optimal |
 | **Collaborative Alignment at $l < 4$** | **Lost** (CF loss applied only at $L=4$) | **Preserved** (multi-depth CF loss) | Preserved |
 | **Sequence Length Savings** | 25% – 35% | 25% – 40% | **35% – 50%** |
@@ -426,10 +262,10 @@ Co-designing the decoder with variable-length IDs yields:
    └── Evaluate Residual-Fidelity Strategy
          │
          ▼
-  [Milestone 2: Design & Implement Matryoshka RQ-VAE (Phase 2)]
+  [Milestone 2: Design & Implement Native Variable-Length Quantizer (Phase 2)]
    ├── Modify models/rqvae.py to output layer-wise reconstructions
-   ├── Implement multi-depth CF contrastive loss: sum_l Loss_CF(x_q_l)
-   └── Train M-RQ-VAE and verify layer 1 & layer 2 reconstruction error
+   ├── Implement prefix-aware CF contrastive losses
+   └── Train the quantizer and verify shallow-prefix reconstruction quality
          │
          ▼
   [Milestone 3: Benchmark Phase 1 vs. Phase 2]
@@ -438,5 +274,5 @@ Co-designing the decoder with variable-length IDs yields:
          │
          ▼
   [Milestone 4: Paper / Publication Deliverable]
-   └── "Matryoshka Semantic IDs: Native Variable-Length Quantization for Generative Recommendation"
+   └── "Native Variable-Length Semantic IDs for Generative Recommendation"
 ```

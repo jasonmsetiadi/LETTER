@@ -177,9 +177,10 @@ model = model.to(device)
 model.eval()
 print(model)
 
-data_loader = DataLoader(data,num_workers=args.num_workers,
-                             batch_size=64, shuffle=False,
-                             pin_memory=True)
+num_workers = int(get_arg("num_workers", 0))
+data_loader = DataLoader(data, num_workers=num_workers,
+                         batch_size=64, shuffle=False,
+                         pin_memory=True)
 
 all_indices = []
 all_indices_str = []
@@ -254,14 +255,14 @@ for d in tqdm(data_loader):
 
     if phase_mode == 2.0:
         indices, pred_lengths = model.get_indices(d, labels, use_sk=False, return_lengths=True)
-        indices = indices.view(-1, indices.shape[-1]).cpu().numpy()
-        pred_lengths_np = pred_lengths.cpu().numpy()
+        indices = indices.view(-1, indices.shape[-1]).cpu().tolist()
+        pred_lengths_np = pred_lengths.cpu().tolist()
     else:
         indices = model.get_indices(d, labels, use_sk=False)
-        indices = indices.view(-1, indices.shape[-1]).cpu().numpy()
+        indices = indices.view(-1, indices.shape[-1]).cpu().tolist()
         pred_lengths_np = None
 
-    emb_idx_np = emb_idx.cpu().numpy() if hasattr(emb_idx, "cpu") else np.array(emb_idx)
+    emb_idx_np = emb_idx.cpu().tolist() if hasattr(emb_idx, "tolist") else list(emb_idx)
     for j, index in enumerate(indices):
         item_id = int(emb_idx_np[j]) if j < len(emb_idx_np) else current_item
         code = []

@@ -77,12 +77,15 @@ class TestPhase2StopPredictor(unittest.TestCase):
         max_depth = 4
         predictor = StopPredictor(in_dim=in_dim, max_depth=max_depth, hidden_dim=64)
 
-        x = torch.randn(bsz, in_dim)
-        logits, probs = predictor(x)
+        # Test with residual sequence [bsz, max_depth, in_dim]
+        residuals = torch.randn(bsz, max_depth, in_dim)
+        logits, probs, survival_probs, pred_lengths = predictor(residuals)
 
         # Check shapes
         self.assertEqual(logits.shape, (bsz, max_depth))
         self.assertEqual(probs.shape, (bsz, max_depth))
+        self.assertEqual(survival_probs.shape, (bsz, max_depth))
+        self.assertEqual(pred_lengths.shape, (bsz,))
 
         # Check probability axioms
         self.assertTrue(torch.all(probs >= 0.0))
@@ -90,20 +93,25 @@ class TestPhase2StopPredictor(unittest.TestCase):
         prob_sums = probs.sum(dim=-1)
         self.assertTrue(torch.allclose(prob_sums, torch.ones(bsz), atol=1e-5))
 
+        # Check survival probabilities (monotonic decrease, start at 1.0)
+        self.assertTrue(torch.allclose(survival_probs[:, 0], torch.ones(bsz), atol=1e-5))
+        for l in range(max_depth - 1):
+            self.assertTrue(torch.all(survival_probs[:, l] >= survival_probs[:, l + 1] - 1e-6))
+
     def test_stop_predictor_gradient_flow(self):
         from models.layers import StopPredictor
         torch.manual_seed(42)
         in_dim = 16
         max_depth = 4
-        predictor = StopPredictor(in_dim=in_dim, max_depth=max_depth)
-        x = torch.randn(8, in_dim)
+        predictor = StopPredictor(in_dim=in_dim, max_depth=max_depth, hidden_dim=32)
+        residuals = torch.randn(8, max_depth, in_dim)
 
-        logits, probs = predictor(x)
+        logits, probs, survival_probs, pred_lengths = predictor(residuals)
         loss = (probs * torch.tensor([1.0, 2.0, 3.0, 4.0])).sum()
         loss.backward()
 
-        self.assertIsNotNone(predictor.net[0].weight.grad)
-        self.assertGreater(predictor.net[0].weight.grad.abs().sum().item(), 0.0)
+        self.assertIsNotNone(predictor.stop_predictor.weight.grad)
+        self.assertGreater(predictor.stop_predictor.weight.grad.abs().sum().item(), 0.0)
 
 
 @unittest.skipIf(not (HAS_TORCH and HAS_NUMPY), "PyTorch and NumPy required for Phase 2 neural tests")
@@ -214,7 +222,7 @@ class TestPhase2RQVAE(unittest.TestCase):
 
         total_loss.backward()
 
-        stop_pred_weight_grad = model.stop_predictor.net[0].weight.grad
+        stop_pred_weight_grad = model.stop_predictor.stop_predictor.weight.grad
         self.assertIsNotNone(stop_pred_weight_grad)
         self.assertGreater(stop_pred_weight_grad.abs().sum().item(), 0.0)
 
@@ -259,7 +267,7 @@ class TestPhase2RQVAE(unittest.TestCase):
 
         total_loss.backward()
 
-        stop_pred_weight_grad = model.stop_predictor.net[0].weight.grad
+        stop_pred_weight_grad = model.stop_predictor.stop_predictor.weight.grad
         self.assertIsNotNone(stop_pred_weight_grad)
         self.assertGreater(stop_pred_weight_grad.abs().sum().item(), 0.0)
 
@@ -284,6 +292,37 @@ class TestPhase2RQVAE(unittest.TestCase):
         self.assertEqual(pred_lens.shape, (self.bsz,))
         self.assertTrue(torch.all(pred_lens >= 1))
         self.assertTrue(torch.all(pred_lens <= 4))
+
+    def test_phase2_length_modes(self):
+        from models.rqvae import RQVAE
+        model = RQVAE(
+            in_dim=self.in_dim,
+            num_emb_list=self.num_emb_list,
+            e_dim=self.e_dim,
+            layers=self.layers,
+            sk_epsilons=[0.0] * 4,
+            phase=2.0,
+        )
+        model.eval()
+
+        x = torch.randn(self.bsz, self.in_dim)
+        labels = {str(i): [] for i in range(4)}
+
+        for mode in ["argmax", "mean", "median"]:
+            indices, pred_lens = model.get_indices(
+                x, labels, use_sk=False, return_lengths=True, length_mode=mode
+            )
+            self.assertEqual(indices.shape, (self.bsz, 4))
+            self.assertEqual(pred_lens.shape, (self.bsz,))
+            self.assertTrue(torch.all(pred_lens >= 1))
+            self.assertTrue(torch.all(pred_lens <= 4))
+
+            out, rq_losses, indices, dense_out, stop_probs, survival_probs, fwd_lens = model(
+                x, labels, use_sk=False, return_lengths=True, length_mode=mode
+            )
+            self.assertEqual(fwd_lens.shape, (self.bsz,))
+            self.assertTrue(torch.all(fwd_lens >= 1))
+            self.assertTrue(torch.all(fwd_lens <= 4))
 
 
 if __name__ == '__main__':
