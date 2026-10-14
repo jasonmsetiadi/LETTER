@@ -379,6 +379,14 @@ if [[ "$MODE" == "varlen" && "$PHASE" != "2" && "$TOKENIZER" != "dvae" ]]; then
   esac
 fi
 
+if [[ "$MODE" == "varlen" && "$PHASE" == "2" && "$TOKENIZER" != "dvae" ]]; then
+  if [[ "$STRATEGY" == "shortest_unique" || -z "$STRATEGY" ]]; then
+    STRATEGY="khrylchenko"
+  fi
+  STRAT_SUFFIX="-${STRATEGY}"
+  STRAT_TAG="-${STRATEGY}"
+fi
+
 EMBEDDING_FILE="${EMBEDDING_FILE:-$DATA_ROOT/$DATASET/$DATASET.emb-bert-base-uncased-td.npy}"
 CF_EMBEDDING="${CF_EMBEDDING:-$REPO_ROOT/RQ-VAE/ckpt/$DATASET-32d-sasrec.pt}"
 
@@ -480,7 +488,10 @@ if [[ "$TOKENIZER" == "letter" ]]; then
   TOK_ALPHA="${USER_ALPHA:-0.01}"
   TOK_BETA="${USER_BETA:-0.0001}"
   if [[ "$PHASE" == "2" ]]; then
-    TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME/phase2"
+    TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME/phase2-${STRATEGY}"
+    if [[ "$RESUME" == true && ! -d "$TOK_CKPT_ROOT" && -d "$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME/phase2" ]]; then
+      TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME/phase2"
+    fi
   elif [[ "$PHASE" == "1.5" ]]; then
     TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME/phase1.5${STRAT_TAG}"
   else
@@ -509,7 +520,10 @@ else
   TOK_ALPHA="${USER_ALPHA:-0.0}"
   TOK_BETA="${USER_BETA:-0.0}"
   if [[ "$PHASE" == "2" ]]; then
-    TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME/phase2"
+    TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME/phase2-${STRATEGY}"
+    if [[ "$RESUME" == true && ! -d "$TOK_CKPT_ROOT" && -d "$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME/phase2" ]]; then
+      TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME/phase2"
+    fi
   elif [[ "$PHASE" == "1.5" ]]; then
     TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME/phase1.5${STRAT_TAG}"
   else
@@ -818,7 +832,10 @@ else
   if [[ "$TOK_NAME" == "dvae" ]]; then
     DEF_VAR_NAME="$DATASET.index.dvae.varlen${VAR_TAG}.json"
   elif [[ "$PHASE" == "2" ]]; then
-    DEF_VAR_NAME="$DATASET.index.varlen-phase2${VAR_TAG}.json"
+    DEF_VAR_NAME="$DATASET.index.varlen-${STRATEGY}-phase2${VAR_TAG}.json"
+    if [[ "$RESUME" == true && ! -f "$TOK_INDEX_DIR/$DEF_VAR_NAME" && -f "$TOK_INDEX_DIR/$DATASET.index.varlen-phase2${VAR_TAG}.json" ]]; then
+      DEF_VAR_NAME="$DATASET.index.varlen-phase2${VAR_TAG}.json"
+    fi
   elif [[ "$PHASE" == "1.5" ]]; then
     DEF_VAR_NAME="$DATASET.index.varlen${STRAT_SUFFIX}-phase1.5${VAR_TAG}.json"
   else
@@ -982,6 +999,13 @@ except Exception:
   CUR_LCREC_CKPT="./ckpt/$DATASET/$TOK_NAME/$CKPT_TAG"
   CUR_TIGER_DEFAULT_RES="./results/$DATASET/$TOK_NAME/${RES_TAG}.json"
   CUR_LCREC_DEFAULT_RES="./results/$DATASET/$TOK_NAME/${RES_TAG}.json"
+  if [[ "$PHASE" == "2" && "$RESUME" == true && ! -f "$CUR_TIGER_DEFAULT_RES" ]]; then
+    legacy_res="./results/$DATASET/$TOK_NAME/varlen${PHASE_RES_TAG}_max${MAX_LENGTH}.json"
+    if [[ -f "$legacy_res" ]]; then
+      CUR_TIGER_DEFAULT_RES="$legacy_res"
+      CUR_LCREC_DEFAULT_RES="$legacy_res"
+    fi
+  fi
   CUR_LCREC_WANDB="${DATASET}-${TOK_NAME}-${CKPT_TAG}"
 fi
 

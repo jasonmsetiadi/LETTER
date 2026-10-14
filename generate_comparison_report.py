@@ -37,7 +37,7 @@ def parse_args():
     parser.add_argument(
         "--strategies",
         type=str,
-        default="fixed,shortest_unique,popularity,residual",
+        default="fixed,shortest_unique,popularity,residual,khrylchenko",
         help="Comma- or space-separated list of strategies.",
     )
     parser.add_argument(
@@ -108,8 +108,10 @@ def file_to_strategy(filename, tag=""):
         stem = stem[:-9]
 
     strat = None
-    if stem == "varlen":
-        strat = "shortest_unique"
+    if stem in ("varlen-khrylchenko", "varlen_khrylchenko"):
+        strat = "khrylchenko"
+    elif stem == "varlen":
+        strat = "khrylchenko" if phase == "2" else "shortest_unique"
     elif stem == "varlen-res":
         strat = "residual"
     elif stem == "varlen-pop":
@@ -146,6 +148,8 @@ def strategy_to_filename(strat, phase, tag=""):
     if strat.startswith("fixed_L") and strat[7:].isdigit():
         return f"{strat}.json"
     phase_str = "_phase1.5" if phase == "1.5" else ("_phase2" if phase == "2" else "")
+    if strat == "khrylchenko":
+        return f"varlen-khrylchenko{phase_str}{tag}.json"
     if strat == "shortest_unique":
         return f"varlen{phase_str}{tag}.json"
     if strat == "residual":
@@ -193,7 +197,9 @@ def strategy_sort_key(strat_name, max_length=4):
         return (2, collab_order.get(sig, 50), 0, strat_name)
     if strat_name == "residual":
         return (3, 0, 0, strat_name)
-    return (4, 0, 0, strat_name)
+    if strat_name == "khrylchenko":
+        return (4, 0, 0, strat_name)
+    return (5, 0, 0, strat_name)
 
 
 def item_sort_key(item, max_length=4):
@@ -570,6 +576,7 @@ def generate_rate_distortion_plot(
     )
 
     palette = {
+        "khrylchenko": "#e74c3c",          # vibrant coral/crimson
         "shortest_unique": "#e67e22",      # orange
         "residual": "#27ae60",             # emerald green
         "popularity:frequency": "#2980b9", # blue
@@ -615,6 +622,7 @@ def generate_rate_distortion_plot(
 
         # 2. Match specific signals before generic "popularity" prefix
         specific_keys = [
+            "khrylchenko",
             "shortest_unique",
             "residual",
             "popularity:frequency",
@@ -784,6 +792,8 @@ def generate_report_for_max_length(
         strat_sfx = ""
         if strat == "residual":
             strat_sfx = ".res"
+        elif strat == "khrylchenko":
+            strat_sfx = "-khrylchenko"
         elif strat == "shortest_unique":
             strat_sfx = ""
         elif strat.startswith("popularity:") or strat.startswith("pop-") or strat.startswith("collaborative:"):
@@ -806,6 +816,11 @@ def generate_report_for_max_length(
             os.path.join(tok_d, f"{dataset}.index{strat_sfx}{ph_tag}{var_t}.json"),
             os.path.join(ds_d, f"{dataset}.index{strat_sfx}{ph_tag}{var_t}.json"),
         ]
+        if strat == "khrylchenko" and ph == "2":
+            cands.extend([
+                os.path.join(tok_d, f"{dataset}.index.varlen-phase2{var_t}.json"),
+                os.path.join(ds_d, f"{dataset}.index.varlen-phase2{var_t}.json"),
+            ])
         if ph in ("1.5", "2"):
             ph_file_tag = "_phase1.5" if ph == "1.5" else "_phase2"
             cands.extend([
@@ -915,11 +930,17 @@ def generate_report_for_max_length(
 
     for strat, phase in combined_items:
         res_fname = strategy_to_filename(strat, phase, tag)
+        cand_fnames = [res_fname] if res_fname else []
+        if strat == "khrylchenko" and phase == "2":
+            cand_fnames.append(f"varlen_phase2{tag}.json")
         res_file = None
         for cdir in cand_dirs:
-            cand_path = os.path.join(cdir, res_fname) if res_fname else None
-            if cand_path and os.path.isfile(cand_path):
-                res_file = cand_path
+            for cfn in cand_fnames:
+                cand_path = os.path.join(cdir, cfn) if cfn else None
+                if cand_path and os.path.isfile(cand_path):
+                    res_file = cand_path
+                    break
+            if res_file:
                 break
 
 
@@ -1215,6 +1236,8 @@ def generate_report_for_max_length(
         strat_sfx = ""
         if strat == "residual":
             strat_sfx = ".res"
+        elif strat == "khrylchenko":
+            strat_sfx = "-khrylchenko"
         elif strat == "shortest_unique":
             strat_sfx = ""
         elif strat.startswith("popularity:") or strat.startswith("pop-") or strat.startswith("collaborative:"):
@@ -1228,7 +1251,7 @@ def generate_report_for_max_length(
             }
             strat_sfx = sig_map.get(sig, f".pop-{sig}")
 
-        ph_tag = "-phase1.5" if ph == "1.5" else ""
+        ph_tag = "-phase1.5" if ph == "1.5" else ("-phase2" if ph == "2" else "")
         cands = [
             os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}{ph_tag}{var_t}.json"),
             os.path.join(tok_d, f"{dataset}.index.varlen-{strat.replace(':', '-')}{ph_tag}{var_t}.json"),
@@ -1237,10 +1260,16 @@ def generate_report_for_max_length(
             os.path.join(tok_d, f"{dataset}.index{strat_sfx}{ph_tag}{var_t}.json"),
             os.path.join(ds_d, f"{dataset}.index{strat_sfx}{ph_tag}{var_t}.json"),
         ]
-        if ph == "1.5":
+        if strat == "khrylchenko" and ph == "2":
             cands.extend([
-                os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}_phase1.5{var_t}.json"),
-                os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}_phase1.5{var_t}.json"),
+                os.path.join(tok_d, f"{dataset}.index.varlen-phase2{var_t}.json"),
+                os.path.join(ds_d, f"{dataset}.index.varlen-phase2{var_t}.json"),
+            ])
+        if ph in ("1.5", "2"):
+            ph_file_tag = "_phase1.5" if ph == "1.5" else "_phase2"
+            cands.extend([
+                os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}{ph_file_tag}{var_t}.json"),
+                os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}{ph_file_tag}{var_t}.json"),
             ])
         if max_length == 4 and min_length == 1:
             cands.extend([

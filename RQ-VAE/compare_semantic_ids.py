@@ -59,6 +59,11 @@ SIGNAL_METADATA = {
         "basis": "1 - kNN crowd cosine density in CF space",
         "file_tag": "pop-cf",
     },
+    "khrylchenko": {
+        "label": "Khrylchenko Hazard Stopping",
+        "basis": "Native Causal Transformer Hazard Stopping & Rate-Distortion (Phase 2)",
+        "file_tag": "khrylchenko",
+    },
 }
 
 
@@ -711,10 +716,16 @@ def evaluate_semantic_ids(
         strat_suffix = ""
         if strat == "residual":
             strat_suffix = ".res"
+        elif strat == "khrylchenko":
+            strat_suffix = "-khrylchenko"
         elif strat.startswith("popularity:"):
             signal = strat.split(":", 1)[1]
             strat_suffix = {"frequency": ".pop", "user_entropy": ".pop-entropy", "pagerank": ".pop-pagerank", "co_occurrence": ".pop-cooccur", "cf_density": ".pop-cf"}.get(signal, f".pop-{signal}")
         index_path = tok_dir / f"{dataset}.index.varlen{strat_suffix}-phase2{var_tag}.json"
+        if not index_path.exists() and strat in ("khrylchenko", "shortest_unique"):
+            fallback = tok_dir / f"{dataset}.index.varlen-phase2{var_tag}.json"
+            if fallback.exists():
+                index_path = fallback
         if not index_path.exists():
             results.append({"strategy": strat_key, "phase": "2", "signal": strat, "label": f"{meta.get('label', strat)} (Phase 2)", "basis": f"Native Variable-Length Training (Phase 2): {meta.get('basis', '')}".strip(), "file_tag": f"{meta.get('file_tag', strat)}-phase2", "mean_length": None, "traffic_weighted_length": None, "token_savings_pct": None, "spearman_rho_vs_frequency": None, "length_distribution": {}, "unique_ids": 0, "collisions": 0})
             return
