@@ -11,5 +11,7 @@ torchrun --nproc_per_node=2 --master_port=2314 ./finetune.py \
     --per_device_batch_size 256 \
     --learning_rate 5e-4 \
     --epochs 200 \
+    --save_and_eval_strategy steps \
+    --save_and_eval_steps 1000 \
     --index_file .index.json \
     --temperature 1.0
