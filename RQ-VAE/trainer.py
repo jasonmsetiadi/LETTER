@@ -383,7 +383,10 @@ class Trainer(object):
                 epoch_idx, training_start_time, training_end_time, train_loss, train_recon_loss, cf_loss,
                 expected_len=expected_len, entropy=entropy
             )
-            self.logger.info(train_loss_output)
+            # Avoid noisy per-epoch output; report training metrics at the
+            # same interval used for validation.
+            if (epoch_idx + 1) % self.eval_step == 0 or epoch_idx + 1 == self.epochs:
+                self.logger.info(train_loss_output)
 
             if train_loss < self.best_loss:
                 self.best_loss = train_loss
