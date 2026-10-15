@@ -144,6 +144,7 @@ class Trainer(object):
                     total=len(init_loader),
                     ncols=100,
                     desc=set_color(f"Initialization of vq","pink"),
+                    disable=True,
                     )
         # Train
         for batch_idx, data in enumerate(iter_data):
@@ -169,6 +170,7 @@ class Trainer(object):
                     total=len(train_data),
                     ncols=100,
                     desc=set_color(f"Train {epoch_idx}","pink"),
+                    disable=True,
                     )
         if getattr(self.model, "beta", 0) > 0:
             embs  = [layer.embedding.weight.cpu().detach().numpy() for layer in self.model.rq.vq_layers]
@@ -247,6 +249,7 @@ class Trainer(object):
                 total=len(valid_data),
                 ncols=100,
                 desc=set_color(f"Evaluate   ", "pink"),
+                disable=True,
             )
         indices_set = set()
 

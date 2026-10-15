@@ -1,4 +1,5 @@
 import argparse
+import logging
 import random
 import torch
 import numpy as np
@@ -10,6 +11,11 @@ from models.rqvae import RQVAE
 from trainer import Trainer
 import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="RQ-VAE")
