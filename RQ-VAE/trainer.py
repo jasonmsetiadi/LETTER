@@ -164,7 +164,6 @@ class Trainer(object):
         total_entropy = 0
         total_length_counts = None
         num_batches = len(train_data) if hasattr(train_data, "__len__") else 1
-        print(len(train_data))
         iter_data = tqdm(
                     train_data,
                     total=len(train_data),
