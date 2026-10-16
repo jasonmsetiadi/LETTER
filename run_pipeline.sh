@@ -29,13 +29,11 @@ RQ-VAE / Tokenizer Options:
   --embedding-file PATH        Item embedding .npy path
   --cf-embedding PATH          Collaborative-filtering embedding .pt path (required for letter)
   --rqvae-epochs COUNT         RQ-VAE epochs (default: 10000)
-  --rqvae-eval-step COUNT      RQ-VAE validation interval (default: 2000)
   --rqvae-device DEVICE        RQ-VAE device (default: cuda:0)
   --alpha VALUE                Collaborative-loss weight (default: 0.01 for letter, 0.0 for rqvae)
   --beta VALUE                 Diversity-loss weight (default: 0.0001 for letter, 0.0 for rqvae)
   --num-layers COUNT           Number of RQ-VAE codebook layers / SID length (default: 4 or max-length)
   --num-emb-list LIST          Explicit codebook sizes (e.g. "256 256 256 256")
-  --length-cost VALUE          Expected length penalty (gamma) for Phase 2 / dVAE (default: 0.05)
   --length-entropy-weight VAL  Entropy regularization weight for Phase 2 RQ-VAE/LETTER (default: 0.01)
   --stop-hidden-dim COUNT      Hidden dimension for Phase 2 stop predictor (default: 128)
 
@@ -99,13 +97,11 @@ EMBEDDING_FILE=""
 CF_EMBEDDING=""
 RESUME=false
 RQ_EPOCHS="10000"
-RQ_EVAL_STEP="2000"
 RQ_DEVICE="cuda:0"
 USER_ALPHA=""
 USER_BETA=""
 USER_NUM_LAYERS=""
 USER_NUM_EMB_LIST=""
-LENGTH_COST="0.05"
 LENGTH_ENTROPY_WEIGHT="0.01"
 STOP_HIDDEN_DIM="128"
 MIN_LENGTH="1"
@@ -138,13 +134,11 @@ while [[ $# -gt 0 ]]; do
     --cf-embedding) CF_EMBEDDING="$2"; shift 2 ;;
     --resume) RESUME=true; shift ;;
     --rqvae-epochs) RQ_EPOCHS="$2"; shift 2 ;;
-    --rqvae-eval-step) RQ_EVAL_STEP="$2"; shift 2 ;;
     --rqvae-device) RQ_DEVICE="$2"; shift 2 ;;
     --alpha) USER_ALPHA="$2"; shift 2 ;;
     --beta) USER_BETA="$2"; shift 2 ;;
     --num-layers) USER_NUM_LAYERS="$2"; shift 2 ;;
     --num-emb-list) USER_NUM_EMB_LIST="$2"; shift 2 ;;
-    --length-cost|--length_cost) LENGTH_COST="$2"; shift 2 ;;
     --length-entropy-weight|--length_entropy_weight) LENGTH_ENTROPY_WEIGHT="$2"; shift 2 ;;
     --stop-hidden-dim|--stop_hidden_dim) STOP_HIDDEN_DIM="$2"; shift 2 ;;
     --min-length) MIN_LENGTH="$2"; shift 2 ;;
@@ -576,13 +570,12 @@ ensure_tokenizer_checkpoint() {
       --data_path "$EMBEDDING_FILE"
       --dataset "$DATASET"
       --epochs "$RQ_EPOCHS"
-      --eval_step "$RQ_EVAL_STEP"
       --ckpt_dir "$TOK_CKPT_ROOT"
       --maxlen "$NUM_LAYERS"
       --model_name "best_loss_model_L${NUM_LAYERS}"
     )
     if [[ "$MODE" == "varlen" ]]; then
-      dvae_train_cmd+=(--varlen --length_cost "$LENGTH_COST")
+      dvae_train_cmd+=(--varlen)
     fi
     if [[ "$TOK_NEEDS_CF" == true && -n "$CF_EMBEDDING" ]]; then
       dvae_train_cmd+=(--cf_emb "$CF_EMBEDDING" --alpha "$TOK_ALPHA")
@@ -630,7 +623,6 @@ ensure_tokenizer_checkpoint() {
     --alpha "$TOK_ALPHA"
     --beta "$TOK_BETA"
     --epochs "$RQ_EPOCHS"
-    --eval_step "$RQ_EVAL_STEP"
     --ckpt_dir "$TOK_CKPT_ROOT"
     --num_emb_list "${NUM_EMB_LIST[@]}"
     --model_name "best_collision_model_L${NUM_LAYERS}"
@@ -644,7 +636,6 @@ ensure_tokenizer_checkpoint() {
   if [[ "$PHASE" == "2" ]]; then
     rq_train_cmd+=(
       --phase 2.0
-      --length_cost "$LENGTH_COST"
       --length_entropy_weight "$LENGTH_ENTROPY_WEIGHT"
       --stop_hidden_dim "$STOP_HIDDEN_DIM"
     )
