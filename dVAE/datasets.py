@@ -3,6 +3,7 @@ from typing import Tuple
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 
@@ -42,6 +43,10 @@ class EmbDataset(Dataset):
 
         if self.tensor_embeddings.ndim == 1:
             self.tensor_embeddings = self.tensor_embeddings.unsqueeze(0)
+        # Keep the input and decoder outputs on the same unit-norm scale.
+        # With MSE on unit vectors, this is equivalent to minimizing cosine
+        # distance up to an additive/constant scale factor.
+        self.tensor_embeddings = F.normalize(self.tensor_embeddings, dim=-1)
         self.dim = self.tensor_embeddings.shape[-1]
 
     def __getitem__(self, index: int) -> Tuple[torch.Tensor, int]:
