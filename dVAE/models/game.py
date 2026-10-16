@@ -180,6 +180,10 @@ class VarlenGame(nn.Module):
                 "recon_loss": recon_loss.detach(),
                 "KL_vocab": KL_vocab_term.detach(),
                 "expected_len": E_L.detach(),
+                "pred_length_counts": torch.bincount(
+                    length_probs.argmax(dim=-1) + 1,
+                    minlength=T + 1,
+                )[1:].detach(),
                 "length_entropy": length_entropy.detach(),
                 "KL_length": KL_length_term.detach(),
                 "H_Z_given_X": H_Z_given_X_total,

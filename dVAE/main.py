@@ -65,7 +65,7 @@ def parse_args():
 
     # Environment
     parser.add_argument("--device", type=str, default="cuda:0" if torch.cuda.is_available() else "cpu", help="Device (e.g. cuda:0 or cpu)")
-    parser.add_argument("--eval_step", type=int, default=200, help="Epoch interval to log and evaluate")
+    parser.add_argument("--eval_step", type=int, default=500, help="Epoch interval to log and evaluate")
     parser.add_argument("--ckpt_dir", type=str, default="./dVAE/ckpt", help="Directory to save model checkpoints")
     parser.add_argument("--model_name", type=str, default="best_loss_model", help="Checkpoint filename stem")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
@@ -159,6 +159,7 @@ def main():
         epoch_exp_len = []
         epoch_length_entropy = []
         epoch_kl_length = []
+        length_counts = torch.zeros(args.maxlen, dtype=torch.long)
 
         for batch_x, batch_idx in dataloader:
             batch_x = batch_x.to(device)
@@ -196,6 +197,8 @@ def main():
                 epoch_length_entropy.append(metrics["length_entropy"].item())
             if "KL_length" in metrics:
                 epoch_kl_length.append(metrics["KL_length"].item())
+            if "pred_length_counts" in metrics:
+                length_counts += metrics["pred_length_counts"].cpu()
 
             global_step += 1
 
@@ -211,12 +214,19 @@ def main():
             f" | KL_length: {sum(epoch_kl_length) / len(epoch_kl_length):.4f}"
             if epoch_kl_length else ""
         )
+        length_dist_str = (
+            " | LenDist: " + ", ".join(
+                f"L{i + 1}={100.0 * count / length_counts.sum().clamp_min(1):.2f}%"
+                for i, count in enumerate(length_counts)
+            )
+            if epoch_exp_len else ""
+        )
 
         if epoch % args.eval_step == 0 or epoch == args.epochs or epoch == 1:
             print(
                 f"[dVAE] Epoch {epoch:4d}/{args.epochs} | Loss: {avg_loss:.4f} | "
                 f"Recon: {avg_recon:.4f} | KL: {avg_kl:.4f}{avg_len_str} | Tau: {tau:.3f}"
-                f"{avg_entropy_str}{avg_kl_length_str}"
+                f"{avg_entropy_str}{avg_kl_length_str}{length_dist_str}"
             )
 
         # Checkpoint saving
