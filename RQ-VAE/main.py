@@ -131,7 +131,6 @@ if __name__ == '__main__':
                   rate_scale = getattr(args, "rate_scale", 1e-4),
                   stop_hidden_dim = getattr(args, "stop_hidden_dim", 128),
                   )
-    print(model)
     data_loader = DataLoader(data,num_workers=args.num_workers,
                              batch_size=args.batch_size, shuffle=True,
                              pin_memory=True)
