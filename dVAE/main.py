@@ -157,6 +157,8 @@ def main():
         epoch_recon = []
         epoch_kl = []
         epoch_exp_len = []
+        epoch_length_entropy = []
+        epoch_kl_length = []
 
         for batch_x, batch_idx in dataloader:
             batch_x = batch_x.to(device)
@@ -190,6 +192,10 @@ def main():
             epoch_kl.append(metrics["KL_vocab"].item())
             if "expected_len" in metrics:
                 epoch_exp_len.append(metrics["expected_len"].item())
+            if "length_entropy" in metrics:
+                epoch_length_entropy.append(metrics["length_entropy"].item())
+            if "KL_length" in metrics:
+                epoch_kl_length.append(metrics["KL_length"].item())
 
             global_step += 1
 
@@ -197,11 +203,20 @@ def main():
         avg_recon = float(sum(epoch_recon) / max(len(epoch_recon), 1))
         avg_kl = float(sum(epoch_kl) / max(len(epoch_kl), 1))
         avg_len_str = f" | ExpLen: {sum(epoch_exp_len) / len(epoch_exp_len):.2f}" if epoch_exp_len else ""
+        avg_entropy_str = (
+            f" | LenEntropy: {sum(epoch_length_entropy) / len(epoch_length_entropy):.4f}"
+            if epoch_length_entropy else ""
+        )
+        avg_kl_length_str = (
+            f" | KL_length: {sum(epoch_kl_length) / len(epoch_kl_length):.4f}"
+            if epoch_kl_length else ""
+        )
 
         if epoch % args.eval_step == 0 or epoch == args.epochs or epoch == 1:
             print(
                 f"[dVAE] Epoch {epoch:4d}/{args.epochs} | Loss: {avg_loss:.4f} | "
                 f"Recon: {avg_recon:.4f} | KL: {avg_kl:.4f}{avg_len_str} | Tau: {tau:.3f}"
+                f"{avg_entropy_str}{avg_kl_length_str}"
             )
 
         # Checkpoint saving
