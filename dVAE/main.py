@@ -48,7 +48,7 @@ def parse_args():
 
     # Variable-length mechanism arguments
     parser.add_argument("--varlen", action="store_true", default=False, help="Enable variable-length hazard stopping mechanism")
-    parser.add_argument("--length_cost", type=float, default=0.05, help="Length rate penalty weight (gamma) for variable length")
+    parser.add_argument("--length_cost", type=float, default=5.0, help="Length rate penalty weight (gamma) for variable length")
     parser.add_argument("--length_selection_mode", type=str, default="argmax", choices=["argmax", "mean", "median"], help="Inference length mode")
 
     # Training hyperparameters
@@ -59,8 +59,8 @@ def parse_args():
     parser.add_argument("--num_workers", type=int, default=0, help="DataLoader num workers")
     parser.add_argument("--tau_start", type=float, default=2.0, help="Initial Gumbel temperature")
     parser.add_argument("--tau_end", type=float, default=0.5, help="Final Gumbel temperature")
-    parser.add_argument("--beta_start", type=float, default=1e-4, help="Initial vocab KL weight")
-    parser.add_argument("--beta_end", type=float, default=1e-3, help="Final vocab KL weight")
+    parser.add_argument("--beta_start", type=float, default=0.0, help="Initial vocab KL weight")
+    parser.add_argument("--beta_end", type=float, default=2e-3, help="Final vocab KL weight")
     parser.add_argument("--free_bits", type=float, default=None, help="Free bits clamp for vocab KL")
 
     # Environment
