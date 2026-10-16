@@ -159,6 +159,7 @@ class Trainer(object):
         total_recon_loss = 0
         total_cf_loss = 0
         total_quant_loss = 0
+        total_rate_loss = 0
         total_expected_len = 0
         total_entropy = 0
         total_length_counts = None
@@ -187,7 +188,7 @@ class Trainer(object):
                     self.labels,
                     return_lengths=True,
                 )
-                loss, cf_loss, loss_recon, quant_loss, expected_len, entropy = self.model.compute_loss(
+                loss, cf_loss, loss_recon, quant_loss, expected_len, entropy, rate_loss = self.model.compute_loss(
                     out,
                     rq_loss,
                     emb_idx,
@@ -198,6 +199,7 @@ class Trainer(object):
                 )
                 total_expected_len += (expected_len.item() if hasattr(expected_len, "item") else float(expected_len))
                 total_entropy += (entropy.item() if hasattr(entropy, "item") else float(entropy))
+                total_rate_loss += rate_loss.item() if hasattr(rate_loss, "item") else float(rate_loss)
                 pred_lengths = stop_probs.argmax(dim=-1)
                 batch_counts = torch.bincount(pred_lengths, minlength=stop_probs.size(-1))
                 total_length_counts = batch_counts if total_length_counts is None else total_length_counts + batch_counts
@@ -236,7 +238,8 @@ class Trainer(object):
         if self.phase == 2.0:
             avg_expected_len = total_expected_len / max(num_batches, 1)
             avg_entropy = total_entropy / max(num_batches, 1)
-            return total_loss, total_recon_loss, total_cf_loss, total_quant_loss, avg_expected_len, avg_entropy, total_length_counts
+            avg_rate_loss = total_rate_loss / max(num_batches, 1)
+            return total_loss, total_recon_loss, total_cf_loss, total_quant_loss, avg_expected_len, avg_entropy, avg_rate_loss, total_length_counts
 
         return total_loss, total_recon_loss, total_cf_loss, total_quant_loss
 
@@ -344,7 +347,7 @@ class Trainer(object):
         )
 
 
-    def _generate_train_loss_output(self, epoch_idx, s_time, e_time, loss, recon_loss, cf_loss, expected_len=None, entropy=None, length_dist=None):
+    def _generate_train_loss_output(self, epoch_idx, s_time, e_time, loss, recon_loss, cf_loss, quant_loss=None, rate_loss=None, expected_len=None, entropy=None, length_dist=None):
         train_loss_output = (
             set_color("epoch %d training", "green")
             + " ["
@@ -356,6 +359,10 @@ class Trainer(object):
         train_loss_output += set_color("reconstruction loss", "blue") + ": %.4f" % recon_loss
         train_loss_output +=", "
         train_loss_output += set_color("cf loss", "blue") + ": %.4f" % cf_loss
+        if quant_loss is not None:
+            train_loss_output += ", " + set_color("quantization loss", "blue") + ": %.4f" % quant_loss
+        if rate_loss is not None:
+            train_loss_output += ", " + set_color("rate loss", "blue") + ": %.4f" % rate_loss
         if expected_len is not None:
             train_loss_output += ", " + set_color("expected len", "blue") + ": %.3f" % expected_len
         if entropy is not None:
@@ -382,7 +389,9 @@ class Trainer(object):
             train_loss, train_recon_loss, cf_loss, quant_loss = train_results[:4]
             expected_len = train_results[4] if len(train_results) > 4 else None
             entropy = train_results[5] if len(train_results) > 5 else None
-            length_counts = train_results[6] if len(train_results) > 6 else None
+            rate_loss = train_results[6] if len(train_results) > 6 else None
+            length_counts = train_results[7] if len(train_results) > 7 else None
+            quant_loss_value = quant_loss
             length_dist = None
             if length_counts is not None:
                 total_count = length_counts.sum().clamp_min(1)
@@ -394,6 +403,7 @@ class Trainer(object):
             training_end_time = time()
             train_loss_output = self._generate_train_loss_output(
                 epoch_idx + 1, training_start_time, training_end_time, train_loss, train_recon_loss, cf_loss,
+                quant_loss=quant_loss_value, rate_loss=rate_loss,
                 expected_len=expected_len, entropy=entropy, length_dist=length_dist
             )
             # Avoid noisy per-epoch output; report training metrics at the

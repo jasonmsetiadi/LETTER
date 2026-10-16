@@ -310,4 +310,4 @@ class RQVAE(nn.Module):
 
         total_loss = loss_recon + self.quant_loss_weight * loss_quant + self.alpha * cf_loss + rate_loss
 
-        return total_loss, cf_loss, loss_recon, loss_quant, mean_expected_len, entropy
+        return total_loss, cf_loss, loss_recon, loss_quant, mean_expected_len, entropy, rate_loss
