@@ -454,7 +454,7 @@ import sys, glob, os, torch
 root = sys.argv[1]
 desired_layers = int(sys.argv[2])
 desired_phase = float(sys.argv[3]) if len(sys.argv) > 3 else 1.0
-candidates = glob.glob(os.path.join(root, "**", "best_collision_model.pth"), recursive=True)
+candidates = glob.glob(os.path.join(root, "**", "best_collision_model*.pth"), recursive=True)
 if not candidates:
     candidates = glob.glob(os.path.join(root, "**", "best_loss_model.pth"), recursive=True)
 valid = []
@@ -527,7 +527,7 @@ else
   elif [[ "$PHASE" == "1.5" ]]; then
     TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME/phase1.5${STRAT_TAG}"
   else
-    TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME"
+    TOK_CKPT_ROOT="$REPO_ROOT/checkpoint/$DATASET/$TOK_NAME/fixed"
   fi
   TOK_SK_ARGS=(--sk_epsilons)
   for (( i=0; i<NUM_LAYERS; i++ )); do
@@ -547,8 +547,12 @@ ensure_tokenizer_checkpoint() {
 
   local detected_ckpt=""
   if [[ "$TOK_NAME" == "dvae" ]]; then
-    if [[ "$RESUME" == true && -f "$TOK_CKPT_ROOT/best_loss_model.pth" ]]; then
-      CUR_RQ_CHECKPOINT="$TOK_CKPT_ROOT/best_loss_model.pth"
+    DVAE_MODEL_NAME="best_loss_model_L${NUM_LAYERS}"
+    if [[ "$RESUME" == true && ( -f "$TOK_CKPT_ROOT/${DVAE_MODEL_NAME}.pth" || -f "$TOK_CKPT_ROOT/best_loss_model.pth" ) ]]; then
+      CUR_RQ_CHECKPOINT="$TOK_CKPT_ROOT/${DVAE_MODEL_NAME}.pth"
+      if [[ ! -f "$CUR_RQ_CHECKPOINT" ]]; then
+        CUR_RQ_CHECKPOINT="$TOK_CKPT_ROOT/best_loss_model.pth"
+      fi
       printf '\n[dVAE] [%s] Found existing checkpoint: %s\n' "$TOK_LABEL" "$CUR_RQ_CHECKPOINT"
       printf '[dVAE] Reusing existing checkpoint.\n'
       return 0
@@ -575,6 +579,7 @@ ensure_tokenizer_checkpoint() {
       --eval_step "$RQ_EVAL_STEP"
       --ckpt_dir "$TOK_CKPT_ROOT"
       --maxlen "$NUM_LAYERS"
+      --model_name "best_loss_model_L${NUM_LAYERS}"
     )
     if [[ "$MODE" == "varlen" ]]; then
       dvae_train_cmd+=(--varlen --length_cost "$LENGTH_COST")
@@ -585,9 +590,9 @@ ensure_tokenizer_checkpoint() {
 
     "${dvae_train_cmd[@]}"
 
-    CUR_RQ_CHECKPOINT="$TOK_CKPT_ROOT/best_loss_model.pth"
+    CUR_RQ_CHECKPOINT="$TOK_CKPT_ROOT/${DVAE_MODEL_NAME}.pth"
     if [[ ! -f "$CUR_RQ_CHECKPOINT" ]]; then
-      printf 'dVAE training completed without creating best_loss_model.pth in: %s\n' "$TOK_CKPT_ROOT" >&2
+      printf 'dVAE training completed without creating %s in: %s\n' "${DVAE_MODEL_NAME}.pth" "$TOK_CKPT_ROOT" >&2
       exit 1
     fi
     printf 'Completed %s training in %s.\n' "$TOK_LABEL" "$(format_duration "$((SECONDS - step_start))")"
@@ -628,6 +633,7 @@ ensure_tokenizer_checkpoint() {
     --eval_step "$RQ_EVAL_STEP"
     --ckpt_dir "$TOK_CKPT_ROOT"
     --num_emb_list "${NUM_EMB_LIST[@]}"
+    --model_name "best_collision_model_L${NUM_LAYERS}"
   )
   if [[ "$TOK_NEEDS_CF" == true && -n "$CF_EMBEDDING" ]]; then
     rq_train_cmd+=(--cf_emb "$CF_EMBEDDING")
@@ -1237,17 +1243,6 @@ if contains_model lcrec; then
       printf '[Cleanup] Warning: Results file (%s) missing or empty; keeping checkpoint: %s\n' \
         "$lcrec_results_file" "$lcrec_ckpt_dir" >&2
     fi
-  fi
-fi
-
-# Post-pipeline cleanup: remove the tokenizer checkpoint used by this run.
-# Keep this scoped to the selected checkpoint file so other layers, phases,
-# strategies, or datasets sharing the checkpoint root are not affected.
-if [[ "$CLEAN_CHECKPOINTS" == true && -n "$CUR_RQ_CHECKPOINT" && -f "$CUR_RQ_CHECKPOINT" ]]; then
-  printf '[Cleanup] Removing %s tokenizer checkpoint: %s\n' "$TOK_LABEL" "$CUR_RQ_CHECKPOINT"
-  rm -f "$CUR_RQ_CHECKPOINT"
-  if [[ -d "$TOK_CKPT_ROOT" ]]; then
-    find "$TOK_CKPT_ROOT" -depth -type d -empty -delete 2>/dev/null || true
   fi
 fi
 

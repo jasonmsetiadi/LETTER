@@ -28,14 +28,13 @@ class Trainer(object):
         self.device = args.device
         self.device = torch.device(self.device)
         self.ckpt_dir = args.ckpt_dir
-        saved_model_dir = "{}".format(get_local_time())
-        self.ckpt_dir = os.path.join(self.ckpt_dir,saved_model_dir)
         ensure_dir(self.ckpt_dir)
         self.labels = {str(i): [] for i in range(len(self.model.rq.vq_layers))}
         self.best_loss = np.inf
         self.best_collision_rate = np.inf
-        self.best_loss_ckpt = "best_loss_model.pth"
-        self.best_collision_ckpt = "best_collision_model.pth"
+        model_name = getattr(args, "model_name", "best_collision_model")
+        self.best_loss_ckpt = f"{model_name}_loss.pth"
+        self.best_collision_ckpt = f"{model_name}.pth"
 
         self.phase = float(getattr(args, "phase", 1.0))
         self.target_length_strategy = getattr(args, "target_length_strategy", "popularity")

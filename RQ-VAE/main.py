@@ -53,6 +53,7 @@ def parse_args():
     parser.add_argument('--layers', type=int, nargs='+', default=[2048,1024,512,256,128,64], help='hidden sizes of every layer')
 
     parser.add_argument("--ckpt_dir", type=str, default="../checkpoint", help="output directory for model")
+    parser.add_argument("--model_name", type=str, default="best_collision_model", help="Checkpoint filename stem")
 
     # Phase 1.5 and Phase 2 variable-length arguments
     parser.add_argument('--phase', type=float, default=1.0, help='Tokenizer training phase: 1.0 (fixed length), 1.5 (length-aware), or 2.0 (native learned variable length)')

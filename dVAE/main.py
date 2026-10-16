@@ -67,6 +67,7 @@ def parse_args():
     parser.add_argument("--device", type=str, default="cuda:0" if torch.cuda.is_available() else "cpu", help="Device (e.g. cuda:0 or cpu)")
     parser.add_argument("--eval_step", type=int, default=200, help="Epoch interval to log and evaluate")
     parser.add_argument("--ckpt_dir", type=str, default="./dVAE/ckpt", help="Directory to save model checkpoints")
+    parser.add_argument("--model_name", type=str, default="best_loss_model", help="Checkpoint filename stem")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
     return parser.parse_args()
@@ -219,7 +220,7 @@ def main():
                 "embed_dim": embed_dim,
                 "hidden_size": args.hidden_size,
             }
-            best_path = os.path.join(args.ckpt_dir, "best_loss_model.pth")
+            best_path = os.path.join(args.ckpt_dir, f"{args.model_name}.pth")
             torch.save(ckpt_payload, best_path)
 
     # Save final model
@@ -235,9 +236,9 @@ def main():
         "embed_dim": embed_dim,
         "hidden_size": args.hidden_size,
     }
-    final_path = os.path.join(args.ckpt_dir, "last_model.pth")
+    final_path = os.path.join(args.ckpt_dir, f"{args.model_name}_last.pth")
     torch.save(final_payload, final_path)
-    print(f"[dVAE] Training complete! Best checkpoint saved to {os.path.join(args.ckpt_dir, 'best_loss_model.pth')}")
+    print(f"[dVAE] Training complete! Best checkpoint saved to {os.path.join(args.ckpt_dir, args.model_name + '.pth')}")
 
 
 if __name__ == "__main__":
