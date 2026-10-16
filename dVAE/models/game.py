@@ -126,8 +126,10 @@ class VarlenGame(nn.Module):
 
         # Multi-depth reconstruction loss
         recon_loss = 0.0
+        recon_depth = []
         for step in range(T):
             step_loss = self._loss_fn(x.float(), receiver_output[:, step].float())
+            recon_depth.append(step_loss.mean())
             recon_loss = recon_loss + (smoothed_length_probs[:, step] * step_loss).mean()
 
         # Vocabulary KL
@@ -178,6 +180,7 @@ class VarlenGame(nn.Module):
             metrics = {
                 "loss": loss.detach(),
                 "recon_loss": recon_loss.detach(),
+                "recon_depth": torch.stack(recon_depth).detach(),
                 "KL_vocab": KL_vocab_term.detach(),
                 "expected_len": E_L.detach(),
                 "pred_length_counts": torch.bincount(

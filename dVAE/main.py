@@ -161,6 +161,8 @@ def main():
         epoch_length_entropy = []
         epoch_kl_length = []
         length_counts = torch.zeros(args.maxlen, dtype=torch.long)
+        recon_depth_sum = torch.zeros(args.maxlen, dtype=torch.float32)
+        recon_depth_batches = 0
 
         for batch_x, batch_idx in dataloader:
             batch_x = batch_x.to(device)
@@ -200,6 +202,9 @@ def main():
                 epoch_kl_length.append(metrics["KL_length"].item())
             if "pred_length_counts" in metrics:
                 length_counts += metrics["pred_length_counts"].cpu()
+            if "recon_depth" in metrics:
+                recon_depth_sum += metrics["recon_depth"].cpu()
+                recon_depth_batches += 1
 
             global_step += 1
 
@@ -222,12 +227,19 @@ def main():
             )
             if epoch_exp_len else ""
         )
+        recon_depth_str = (
+            " | ReconDepth: " + ", ".join(
+                f"L{i + 1}={value:.4f}"
+                for i, value in enumerate(recon_depth_sum / max(recon_depth_batches, 1))
+            )
+            if recon_depth_batches else ""
+        )
 
         if epoch % args.eval_step == 0 or epoch == args.epochs or epoch == 1:
             print(
                 f"[dVAE] Epoch {epoch:4d}/{args.epochs} | Loss: {avg_loss:.4f} | "
                 f"Recon: {avg_recon:.4f} | KL: {avg_kl:.4f}{avg_len_str} | Tau: {tau:.3f}"
-                f"{avg_entropy_str}{avg_kl_length_str}{length_dist_str}"
+                f"{avg_entropy_str}{avg_kl_length_str}{length_dist_str}{recon_depth_str}"
             )
 
         # Checkpoint saving
