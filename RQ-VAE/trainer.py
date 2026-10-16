@@ -137,7 +137,6 @@ class Trainer(object):
         init_loader = DataLoader(original_data,num_workers=self.args.num_workers,
                              batch_size=len(original_data), shuffle=True,
                              pin_memory=True)
-        print(len(init_loader))
         iter_data = tqdm(
                     init_loader,
                     total=len(init_loader),
@@ -376,6 +375,8 @@ class Trainer(object):
         self.vq_init()
         for epoch_idx in range(self.epochs):
             # train
+            if self.phase == 2.0 and hasattr(self.model, "rate_scale"):
+                self.model.rate_scale = 0.0 if epoch_idx == 0 else float(getattr(self.args, "rate_scale", 2e-3))
             training_start_time = time()
             train_results = self._train_epoch(data, epoch_idx)
             train_loss, train_recon_loss, cf_loss, quant_loss = train_results[:4]
