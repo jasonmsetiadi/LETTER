@@ -65,7 +65,7 @@ def parse_args():
 
     # Environment
     parser.add_argument("--device", type=str, default="cuda:0" if torch.cuda.is_available() else "cpu", help="Device (e.g. cuda:0 or cpu)")
-    parser.add_argument("--eval_step", type=int, default=500, help="Epoch interval to log and evaluate")
+    parser.add_argument("--eval_step", type=int, default=100, help="Epoch interval to log and evaluate")
     parser.add_argument("--ckpt_dir", type=str, default="./dVAE/ckpt", help="Directory to save model checkpoints")
     parser.add_argument("--model_name", type=str, default="best_loss_model", help="Checkpoint filename stem")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
@@ -142,6 +142,7 @@ def main():
     )
 
     total_steps = args.epochs * len(dataloader)
+    schedule_steps = len(dataloader)
     global_step = 0
     best_loss = float("inf")
     os.makedirs(args.ckpt_dir, exist_ok=True)
@@ -165,8 +166,8 @@ def main():
             batch_x = batch_x.to(device)
 
             # Cosine scheduling for tau and beta
-            tau = get_cosine_schedule(global_step, args.tau_start, args.tau_end, total_steps)
-            beta = get_cosine_schedule(global_step, args.beta_start, args.beta_end, total_steps)
+            tau = get_cosine_schedule(global_step, args.tau_start, args.tau_end, schedule_steps)
+            beta = get_cosine_schedule(global_step, args.beta_start, args.beta_end, schedule_steps)
             beta_t = torch.tensor(beta, device=device)
 
             batch_cf = None
