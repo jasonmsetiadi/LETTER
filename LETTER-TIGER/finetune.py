@@ -73,10 +73,6 @@ def train(args):
     model.set_hyper(args.temperature)
     model.resize_token_embeddings(len(tokenizer))
     model.to(device)
-    if local_rank == 0:
-        print(model)
-
-
     # if not ddp and torch.cuda.device_count() > 1:
     #     model.is_parallelizable = True
     #     model.model_parallel = True
@@ -99,6 +95,7 @@ def train(args):
             # fp16=args.fp16,
             # bf16=args.bf16,
             logging_steps=args.logging_step,
+            disable_tqdm=True,
             optim=args.optim,
             # gradient_checkpointing=gradient_checkpointing,
             eval_strategy=args.save_and_eval_strategy,
