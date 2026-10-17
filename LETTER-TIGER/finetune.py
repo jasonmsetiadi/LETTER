@@ -64,8 +64,6 @@ def train(args):
         print("data num:", len(train_data))
         tokenizer.save_pretrained(args.output_dir)
         config.save_pretrained(args.output_dir)
-        print(train_data[100])
-        print(valid_data[100])
 
 
     collator = Collator(args, tokenizer)

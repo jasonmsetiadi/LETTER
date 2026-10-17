@@ -1062,6 +1062,8 @@ if contains_model tiger; then
           --per_device_batch_size 256 \
           --learning_rate 5e-4 \
           --epochs 200 \
+          --save_and_eval_strategy epoch \
+          --save_and_eval_steps 20 \
           --index_file "$TARGET_INDEX_ARG" \
           --temperature 1.0
       else
@@ -1076,6 +1078,8 @@ if contains_model tiger; then
           --per_device_batch_size 256 \
           --learning_rate 5e-4 \
           --epochs 200 \
+          --save_and_eval_strategy epoch \
+          --save_and_eval_steps 20 \
           --index_file "$TARGET_INDEX_ARG" \
           --temperature 1.0
       fi
