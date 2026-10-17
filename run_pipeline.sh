@@ -542,8 +542,11 @@ ensure_tokenizer_checkpoint() {
   local detected_ckpt=""
   if [[ "$TOK_NAME" == "dvae" ]]; then
     DVAE_MODEL_NAME="best_loss_model_L${NUM_LAYERS}"
-    if [[ "$RESUME" == true && ( -f "$TOK_CKPT_ROOT/${DVAE_MODEL_NAME}.pth" || -f "$TOK_CKPT_ROOT/best_loss_model.pth" ) ]]; then
+    if [[ "$RESUME" == true && ( -f "$TOK_CKPT_ROOT/${DVAE_MODEL_NAME}.pth" || -f "$TOK_CKPT_ROOT/best_loss_model_phase${PHASE}_L${NUM_LAYERS}.pth" || -f "$TOK_CKPT_ROOT/best_loss_model.pth" ) ]]; then
       CUR_RQ_CHECKPOINT="$TOK_CKPT_ROOT/${DVAE_MODEL_NAME}.pth"
+      if [[ ! -f "$CUR_RQ_CHECKPOINT" ]]; then
+        CUR_RQ_CHECKPOINT="$TOK_CKPT_ROOT/best_loss_model_phase${PHASE}_L${NUM_LAYERS}.pth"
+      fi
       if [[ ! -f "$CUR_RQ_CHECKPOINT" ]]; then
         CUR_RQ_CHECKPOINT="$TOK_CKPT_ROOT/best_loss_model.pth"
       fi
@@ -572,7 +575,7 @@ ensure_tokenizer_checkpoint() {
       --epochs "$RQ_EPOCHS"
       --ckpt_dir "$TOK_CKPT_ROOT"
       --maxlen "$NUM_LAYERS"
-      --model_name "best_loss_model_L${NUM_LAYERS}"
+      --model_name "$DVAE_MODEL_NAME"
     )
     if [[ "$MODE" == "varlen" ]]; then
       dvae_train_cmd+=(--varlen)
@@ -976,9 +979,11 @@ except Exception:
   # Downstream checkpoint and results paths for varlen
   PHASE_CKPT_TAG=""
   PHASE_RES_TAG=""
-  if [[ "$PHASE" == "2" && "$TOK_NAME" != "dvae" ]]; then
-    PHASE_CKPT_TAG="-phase2"
+  if [[ "$PHASE" == "2" ]]; then
     PHASE_RES_TAG="_phase2"
+    if [[ "$TOK_NAME" != "dvae" ]]; then
+      PHASE_CKPT_TAG="-phase2"
+    fi
   elif [[ "$PHASE" == "1.5" ]]; then
     PHASE_CKPT_TAG="-phase1.5"
     PHASE_RES_TAG="_phase1.5"
