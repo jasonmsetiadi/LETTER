@@ -34,7 +34,6 @@ RQ-VAE / Tokenizer Options:
   --beta VALUE                 Diversity-loss weight (default: 0.0001 for letter, 0.0 for rqvae)
   --num-layers COUNT           Number of RQ-VAE codebook layers / SID length (default: 4 or max-length)
   --num-emb-list LIST          Explicit codebook sizes (e.g. "256 256 256 256")
-  --length-entropy-weight VAL  Entropy regularization weight for Phase 2 RQ-VAE/LETTER (default: 0.01)
   --stop-hidden-dim COUNT      Hidden dimension for Phase 2 stop predictor (default: 128)
 
 Index Generation & Variable-Length Options:
@@ -102,7 +101,6 @@ USER_ALPHA=""
 USER_BETA=""
 USER_NUM_LAYERS=""
 USER_NUM_EMB_LIST=""
-LENGTH_ENTROPY_WEIGHT="0.01"
 STOP_HIDDEN_DIM="128"
 MIN_LENGTH="1"
 MAX_LENGTH="4"
@@ -139,7 +137,6 @@ while [[ $# -gt 0 ]]; do
     --beta) USER_BETA="$2"; shift 2 ;;
     --num-layers) USER_NUM_LAYERS="$2"; shift 2 ;;
     --num-emb-list) USER_NUM_EMB_LIST="$2"; shift 2 ;;
-    --length-entropy-weight|--length_entropy_weight) LENGTH_ENTROPY_WEIGHT="$2"; shift 2 ;;
     --stop-hidden-dim|--stop_hidden_dim) STOP_HIDDEN_DIM="$2"; shift 2 ;;
     --min-length) MIN_LENGTH="$2"; shift 2 ;;
     --max-length) MAX_LENGTH="$2"; shift 2 ;;
@@ -639,7 +636,6 @@ ensure_tokenizer_checkpoint() {
   if [[ "$PHASE" == "2" ]]; then
     rq_train_cmd+=(
       --phase 2.0
-      --length_entropy_weight "$LENGTH_ENTROPY_WEIGHT"
       --stop_hidden_dim "$STOP_HIDDEN_DIM"
     )
   elif [[ "$PHASE" == "1.5" ]]; then

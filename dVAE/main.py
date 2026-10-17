@@ -48,7 +48,7 @@ def parse_args():
 
     # Variable-length mechanism arguments
     parser.add_argument("--varlen", action="store_true", default=False, help="Enable variable-length hazard stopping mechanism")
-    parser.add_argument("--length_cost", type=float, default=3.0, help="Length rate penalty weight (gamma) for variable length")
+    parser.add_argument("--length_cost", type=float, default=0.5, help="Length rate penalty weight (gamma) for variable length")
     parser.add_argument("--length_selection_mode", type=str, default="argmax", choices=["argmax", "mean", "median"], help="Inference length mode")
 
     # Training hyperparameters

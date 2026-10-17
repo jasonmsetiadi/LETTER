@@ -180,6 +180,12 @@ class Trainer(object):
                 self.labels[str(idx)] = labels
 
         for batch_idx, data in enumerate(iter_data):
+            if self.phase == 2.0 and hasattr(self.model, "rate_scale"):
+                warmup_steps = max(1, self.rate_warmup_steps)
+                progress = min(self.rate_global_step / warmup_steps, 1.0)
+                warmup_factor = 0.5 * (1.0 - np.cos(np.pi * progress))
+                self.model.rate_scale = self.target_rate_scale * warmup_factor
+
             data, emb_idx = data[0], data[1]
             data = data.to(self.device)
             self.optimizer.zero_grad()
@@ -226,6 +232,8 @@ class Trainer(object):
             self._check_nan(loss)
             loss.backward()
             self.optimizer.step()
+            if self.phase == 2.0 and hasattr(self.model, "rate_scale"):
+                self.rate_global_step += 1
             # iter_data.set_postfix_str("Loss: {:.4f}, RQ Loss: {:.4f}".format(loss.item(),rq_loss.item()))
             total_loss += loss.item()
             total_recon_loss += loss_recon.item()
@@ -335,7 +343,6 @@ class Trainer(object):
             "residual_threshold": self.residual_threshold,
             "min_length": self.min_length,
             "length_cost": getattr(self.args, "length_cost", 0.05),
-            "length_entropy_weight": getattr(self.args, "length_entropy_weight", 0.01),
             "best_loss": self.best_loss,
             "best_collision_rate": self.best_collision_rate,
             "best_collision_epoch": self.best_collision_epoch,
@@ -383,10 +390,14 @@ class Trainer(object):
             if hasattr(torch, "full"):
                 self.catalog_lengths = torch.full((num_items,), num_layers, dtype=torch.long, device=self.device)
         self.vq_init()
+        if self.phase == 2.0 and hasattr(self.model, "rate_scale"):
+            batches_per_epoch = len(data) if hasattr(data, "__len__") else 1
+            total_steps = self.epochs * batches_per_epoch
+            self.rate_warmup_steps = max(1, int(total_steps * 0.2))
+            self.rate_global_step = 0
+            self.target_rate_scale = float(getattr(self.args, "rate_scale", 2e-3))
         for epoch_idx in range(self.epochs):
             # train
-            if self.phase == 2.0 and hasattr(self.model, "rate_scale"):
-                self.model.rate_scale = 0.0 if epoch_idx == 0 else float(getattr(self.args, "rate_scale", 2e-3))
             training_start_time = time()
             train_results = self._train_epoch(data, epoch_idx)
             train_loss, train_recon_loss, cf_loss, quant_loss = train_results[:4]

@@ -57,9 +57,8 @@ def parse_args():
 
     # Phase 1.5 and Phase 2 variable-length arguments
     parser.add_argument('--phase', type=float, default=1.0, help='Tokenizer training phase: 1.0 (fixed length), 1.5 (length-aware), or 2.0 (native learned variable length)')
-    parser.add_argument('--length_cost', '--length-cost', type=float, default=5.0, dest='length_cost', help='Expected length cost (gamma) for Phase 2 rate-distortion loss')
-    parser.add_argument('--length_entropy_weight', '--length-entropy-weight', type=float, default=0.01, dest='length_entropy_weight', help='Entropy regularization weight for Phase 2 stopping distribution')
-    parser.add_argument('--rate_scale', '--rate-scale', type=float, default=2e-3, dest='rate_scale', help='Final scaling factor for the Phase 2 rate loss')
+    parser.add_argument('--length_cost', '--length-cost', type=float, default=0.5, dest='length_cost', help='Expected length cost (gamma) for Phase 2 rate-distortion loss')
+    parser.add_argument('--rate_scale', '--rate-scale', type=float, default=2e-3, dest='rate_scale', help='Final Phase 2 rate-loss scale, reached with a cosine warm-up over the first 20% of training')
     parser.add_argument('--stop_hidden_dim', '--stop-hidden-dim', type=int, default=128, dest='stop_hidden_dim', help='Hidden dimension for Phase 2 stop predictor')
     parser.add_argument('--target_lengths', '--target-lengths', type=str, default=None, dest='target_lengths', help='Path to target lengths JSON or index file for Phase 1.5')
     parser.add_argument('--target_length_strategy', '--target-length-strategy', type=str, default='popularity', dest='target_length_strategy', choices=['popularity', 'collaborative', 'shortest_unique', 'residual'], help='Strategy to determine item lengths in Phase 1.5')
@@ -127,7 +126,6 @@ if __name__ == '__main__':
                   cf_embedding = cf_emb,
                   phase = args.phase,
                   length_cost = getattr(args, "length_cost", 0.05),
-                  length_entropy_weight = getattr(args, "length_entropy_weight", 0.01),
                   rate_scale = getattr(args, "rate_scale", 1e-4),
                   stop_hidden_dim = getattr(args, "stop_hidden_dim", 128),
                   )
@@ -137,7 +135,7 @@ if __name__ == '__main__':
 
     target_lengths = None
     if float(args.phase) == 2.0:
-        print(f"[Phase 2.0] Native variable-length training active (length_cost={args.length_cost}, length_entropy_weight={args.length_entropy_weight}).")
+        print(f"[Phase 2.0] Native variable-length training active (length_cost={args.length_cost}).")
     elif float(args.phase) == 1.5:
         if args.target_length_strategy in ("residual", "fidelity") and args.target_lengths is None and args.residuals_file is None:
             thresh = args.residual_threshold if args.residual_threshold is not None else 0.2

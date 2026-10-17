@@ -30,6 +30,7 @@ class RQVAE(nn.Module):
                  cf_embedding = 0,
                  phase = 1.0,
                  length_cost = 0.05,
+                 # Legacy compatibility; entropy is now unweighted.
                  length_entropy_weight = 0.01,
                  rate_scale = 1e-4,
                  stop_hidden_dim = 128,
@@ -48,7 +49,6 @@ class RQVAE(nn.Module):
         self.kmeans_iters = kmeans_iters
         self.phase = float(phase)
         self.length_cost = float(length_cost)
-        self.length_entropy_weight = float(length_entropy_weight)
         self.rate_scale = float(rate_scale)
         self.stop_hidden_dim = int(stop_hidden_dim)
         if sk_epsilons is None and num_emb_list is not None:
@@ -305,7 +305,7 @@ class RQVAE(nn.Module):
         mean_expected_len = expected_lengths.mean()
         entropy = -(stop_probs * torch.log(stop_probs.clamp(min=1e-12))).sum(dim=-1).mean()
         rate_loss = self.rate_scale * (
-            self.length_cost * mean_expected_len - self.length_entropy_weight * entropy
+            self.length_cost * mean_expected_len - entropy
         )
 
         total_loss = loss_recon + self.quant_loss_weight * loss_quant + self.alpha * cf_loss + rate_loss
