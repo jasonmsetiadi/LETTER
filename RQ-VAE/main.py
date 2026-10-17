@@ -167,10 +167,11 @@ if __name__ == '__main__':
             print(f"[Phase 1.5] Length distribution: {len_dist}")
 
     trainer = Trainer(args, model, target_lengths=target_lengths)
-    best_loss, best_collision_rate, best_collision_epoch = trainer.fit(data_loader)
+    best_loss, best_loss_epoch, best_collision_rate, best_collision_epoch = trainer.fit(data_loader)
 
 
     print("Best Loss",best_loss)
+    print("Best Loss Epoch", best_loss_epoch)
     print("Best Collision Rate", best_collision_rate)
     print("Best Collision Rate Epoch", best_collision_epoch)
 

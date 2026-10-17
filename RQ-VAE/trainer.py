@@ -31,6 +31,7 @@ class Trainer(object):
         ensure_dir(self.ckpt_dir)
         self.labels = {str(i): [] for i in range(len(self.model.rq.vq_layers))}
         self.best_loss = np.inf
+        self.best_loss_epoch = None
         self.best_collision_rate = np.inf
         self.best_collision_epoch = None
         model_name = getattr(args, "model_name", "best_collision_model")
@@ -415,6 +416,7 @@ class Trainer(object):
 
             if train_loss < self.best_loss:
                 self.best_loss = train_loss
+                self.best_loss_epoch = epoch_idx + 1
                 # self._save_checkpoint(epoch=epoch_idx,ckpt_file=self.best_loss_ckpt)
 
             # eval
@@ -451,5 +453,5 @@ class Trainer(object):
                     self._save_checkpoint(epoch_idx + 1, collision_rate=collision_rate)
 
 
-        return self.best_loss, self.best_collision_rate, self.best_collision_epoch
+        return self.best_loss, self.best_loss_epoch, self.best_collision_rate, self.best_collision_epoch
 

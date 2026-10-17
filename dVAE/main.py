@@ -146,6 +146,9 @@ def main():
     schedule_steps = max(1, int(total_steps * 0.2))
     global_step = 0
     best_loss = float("inf")
+    best_loss_epoch = None
+    best_collision_rate = float("inf")
+    best_collision_epoch = None
     os.makedirs(args.ckpt_dir, exist_ok=True)
 
     free_bits_t = torch.tensor(args.free_bits, device=device) if args.free_bits is not None else None
@@ -248,15 +251,17 @@ def main():
                 f"{length_dist_str}{recon_depth_str}"
             )
 
-        # Checkpoint saving
+        # Select the main checkpoint by lowest training loss.
         is_best = avg_loss < best_loss
         if is_best:
             best_loss = avg_loss
+            best_loss_epoch = epoch
             ckpt_payload = {
                 "epoch": epoch,
                 "args": vars(args),
                 "state_dict": graph.state_dict(),
                 "best_loss": best_loss,
+                "best_loss_epoch": best_loss_epoch,
                 "varlen": args.varlen,
                 "mode": "varlen" if args.varlen else "fixed",
                 "vocab_size": args.vocab_size,
@@ -266,6 +271,37 @@ def main():
             }
             best_path = os.path.join(args.ckpt_dir, f"{args.model_name}.pth")
             torch.save(ckpt_payload, best_path)
+
+        # Report full-catalog collision rate at the evaluation interval.
+        if epoch % args.eval_step == 0:
+            graph.eval()
+            inference_encoder = encoder.inference(mode=args.length_selection_mode)
+            unique_codes = set()
+            num_items = 0
+            with torch.no_grad():
+                for batch_x, _ in dataloader:
+                    batch_x = batch_x.to(device)
+                    encoded = inference_encoder(batch_x)
+                    if args.varlen:
+                        codes, lengths = encoded
+                        codes = codes.cpu().tolist()
+                        lengths = lengths.cpu().tolist()
+                    else:
+                        codes = encoded.cpu().tolist()
+                        lengths = [args.maxlen] * len(codes)
+
+                    for code, length in zip(codes, lengths):
+                        unique_codes.add(tuple(code[:int(length)]))
+                        num_items += 1
+
+            collision_rate = (num_items - len(unique_codes)) / max(num_items, 1)
+            print(
+                f"[dVAE] Epoch {epoch:4d}/{args.epochs} | "
+                f"CollisionRate: {collision_rate:.6f} ({num_items - len(unique_codes)}/{num_items})"
+            )
+            if collision_rate < best_collision_rate:
+                best_collision_rate = collision_rate
+                best_collision_epoch = epoch
 
     # Save final model
     final_payload = {
@@ -283,6 +319,8 @@ def main():
     final_path = os.path.join(args.ckpt_dir, f"{args.model_name}_last.pth")
     torch.save(final_payload, final_path)
     print(f"[dVAE] Training complete! Best checkpoint saved to {os.path.join(args.ckpt_dir, args.model_name + '.pth')}")
+    print(f"[dVAE] Best training loss: {best_loss:.4f} at epoch {best_loss_epoch}")
+    print(f"[dVAE] Best collision rate: {best_collision_rate:.6f} at epoch {best_collision_epoch}")
 
 
 if __name__ == "__main__":
