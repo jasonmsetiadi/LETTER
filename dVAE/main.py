@@ -65,7 +65,7 @@ def parse_args():
 
     # Environment
     parser.add_argument("--device", type=str, default="cuda:0" if torch.cuda.is_available() else "cpu", help="Device (e.g. cuda:0 or cpu)")
-    parser.add_argument("--eval_step", type=int, default=2000, help="Epoch interval to log and evaluate")
+    parser.add_argument("--eval_step", type=int, default=500, help="Epoch interval to log and evaluate")
     parser.add_argument("--ckpt_dir", type=str, default="./dVAE/ckpt", help="Directory to save model checkpoints")
     parser.add_argument("--model_name", type=str, default="best_loss_model", help="Checkpoint filename stem")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")

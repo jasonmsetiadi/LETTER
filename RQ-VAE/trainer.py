@@ -32,6 +32,7 @@ class Trainer(object):
         self.labels = {str(i): [] for i in range(len(self.model.rq.vq_layers))}
         self.best_loss = np.inf
         self.best_collision_rate = np.inf
+        self.best_collision_epoch = None
         model_name = getattr(args, "model_name", "best_collision_model")
         self.best_loss_ckpt = f"{model_name}_loss.pth"
         self.best_collision_ckpt = f"{model_name}.pth"
@@ -374,6 +375,7 @@ class Trainer(object):
             "length_entropy_weight": getattr(self.args, "length_entropy_weight", 0.01),
             "best_loss": self.best_loss,
             "best_collision_rate": self.best_collision_rate,
+            "best_collision_epoch": self.best_collision_epoch,
             "state_dict": self.model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
         }
@@ -460,8 +462,9 @@ class Trainer(object):
 
                 if collision_rate < self.best_collision_rate:
                     self.best_collision_rate = collision_rate
+                    self.best_collision_epoch = epoch_idx + 1
                     cur_eval_step = 0
-                    self._save_checkpoint(epoch_idx, collision_rate=collision_rate,
+                    self._save_checkpoint(epoch_idx + 1, collision_rate=collision_rate,
                                           ckpt_file=self.best_collision_ckpt)
                 else:
                     cur_eval_step += 1
@@ -485,8 +488,8 @@ class Trainer(object):
                 self.logger.info(valid_score_output)
 
                 if epoch_idx>2500:
-                    self._save_checkpoint(epoch_idx, collision_rate=collision_rate)
+                    self._save_checkpoint(epoch_idx + 1, collision_rate=collision_rate)
 
 
-        return self.best_loss, self.best_collision_rate
+        return self.best_loss, self.best_collision_rate, self.best_collision_epoch
 

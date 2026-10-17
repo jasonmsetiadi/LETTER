@@ -24,7 +24,7 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=20000, help='number of epochs')
     parser.add_argument('--batch_size', type=int, default=1024, help='batch size')
     parser.add_argument('--num_workers', type=int, default=4, )
-    parser.add_argument('--eval_step', type=int, default=2000, help='eval step')
+    parser.add_argument('--eval_step', type=int, default=500, help='eval step')
     parser.add_argument('--learner', type=str, default="AdamW", help='optimizer')
     parser.add_argument("--data_path", type=str, default="../data", help="Input data path.")
 
@@ -167,11 +167,12 @@ if __name__ == '__main__':
             print(f"[Phase 1.5] Length distribution: {len_dist}")
 
     trainer = Trainer(args, model, target_lengths=target_lengths)
-    best_loss, best_collision_rate = trainer.fit(data_loader)
+    best_loss, best_collision_rate, best_collision_epoch = trainer.fit(data_loader)
 
 
     print("Best Loss",best_loss)
     print("Best Collision Rate", best_collision_rate)
+    print("Best Collision Rate Epoch", best_collision_epoch)
 
 
 
