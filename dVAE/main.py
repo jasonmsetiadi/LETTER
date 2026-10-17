@@ -219,10 +219,10 @@ def main():
             f" | LenEntropy: {sum(epoch_length_entropy) / len(epoch_length_entropy):.4f}"
             if epoch_length_entropy else ""
         )
+        avg_kl_length = sum(epoch_kl_length) / len(epoch_kl_length) if epoch_kl_length else None
         avg_kl_length_str = (
-            f" | LengthLoss: {avg_beta * (sum(epoch_kl_length) / len(epoch_kl_length)):.4f}"
-            f" | KL_length: {sum(epoch_kl_length) / len(epoch_kl_length):.4f}"
-            if epoch_kl_length else ""
+            f" | LengthLoss: {avg_beta * avg_kl_length:.4f} | KL_length: {avg_kl_length:.4f}"
+            if avg_kl_length is not None else ""
         )
         length_dist_str = (
             " | LenDist: " + ", ".join(
@@ -241,10 +241,11 @@ def main():
 
         if epoch % args.eval_step == 0 or epoch == args.epochs or epoch == 1:
             print(
-                f"[dVAE] Epoch {epoch:4d}/{args.epochs} | Beta: {avg_beta:.6f} | Loss: {avg_loss:.4f} | "
+                f"[dVAE] Epoch {epoch:4d}/{args.epochs} | Tau: {tau:.3f} | Beta: {avg_beta:.6f} | "
+                f"Loss: {avg_loss:.4f} | "
                 f"Recon: {avg_recon:.4f} | VocabLoss: {avg_vocab_loss:.4f} | VocabKL: {avg_kl:.4f}"
-                f"{avg_len_str} | Tau: {tau:.3f}"
-                f"{avg_entropy_str}{avg_kl_length_str}{length_dist_str}{recon_depth_str}"
+                f"{avg_kl_length_str}{avg_len_str}{avg_entropy_str}"
+                f"{length_dist_str}{recon_depth_str}"
             )
 
         # Checkpoint saving
