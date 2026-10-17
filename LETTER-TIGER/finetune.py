@@ -2,7 +2,7 @@ import argparse
 import os
 import sys
 from typing import List
-from transformers import EarlyStoppingCallback, TrainerCallback
+from transformers import EarlyStoppingCallback
 
 import torch
 import transformers
@@ -12,20 +12,6 @@ from modeling_letter import LETTER
 # import wandb
 from utils import *
 from collator import Collator
-
-
-class EvalEveryNEpochsCallback(TrainerCallback):
-    """Restrict epoch-based evaluation and saving to a fixed epoch interval."""
-
-    def __init__(self, interval: int):
-        self.interval = max(1, int(interval))
-
-    def on_epoch_end(self, args, state, control, **kwargs):
-        epoch = int(round(state.epoch or 0))
-        should_run = epoch > 0 and epoch % self.interval == 0
-        control.should_evaluate = should_run
-        control.should_save = should_run
-        return control
 
 
 def train(args):
@@ -111,10 +97,7 @@ def train(args):
         ),
         tokenizer=tokenizer,
         data_collator=collator,
-        callbacks=[
-            EvalEveryNEpochsCallback(args.save_and_eval_steps),
-            EarlyStoppingCallback(early_stopping_patience=20),
-        ],
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=20)],
     )
     model.config.use_cache = False
 
