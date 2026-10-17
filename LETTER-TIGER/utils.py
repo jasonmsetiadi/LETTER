@@ -67,7 +67,7 @@ def parse_train_args(parser):
     parser.add_argument("--warmup_ratio", type=float, default=0.01)
     parser.add_argument("--lr_scheduler_type", type=str, default="cosine")
     parser.add_argument("--save_and_eval_strategy", type=str, default="epoch")
-    parser.add_argument("--save_and_eval_steps", type=int, default=1000)
+    parser.add_argument("--save_and_eval_steps", type=int, default=2)
     parser.add_argument("--fp16",  action="store_true", default=False)
     parser.add_argument("--bf16", action="store_true", default=False)
     parser.add_argument("--deepspeed", type=str, default="./config/ds_z3_bf16.json")

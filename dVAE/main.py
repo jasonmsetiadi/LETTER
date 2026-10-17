@@ -145,10 +145,8 @@ def main():
     # Ramp beta to beta_end over the first 20% of training, then hold it there.
     schedule_steps = max(1, int(total_steps * 0.2))
     global_step = 0
-    best_loss = float("inf")
-    best_loss_epoch = None
-    best_collision_rate = float("inf")
-    best_collision_epoch = None
+    last_collision_rate = None
+    last_collision_epoch = None
     os.makedirs(args.ckpt_dir, exist_ok=True)
 
     free_bits_t = torch.tensor(args.free_bits, device=device) if args.free_bits is not None else None
@@ -251,27 +249,6 @@ def main():
                 f"{length_dist_str}{recon_depth_str}"
             )
 
-        # Select the main checkpoint by lowest training loss.
-        is_best = avg_loss < best_loss
-        if is_best:
-            best_loss = avg_loss
-            best_loss_epoch = epoch
-            ckpt_payload = {
-                "epoch": epoch,
-                "args": vars(args),
-                "state_dict": graph.state_dict(),
-                "best_loss": best_loss,
-                "best_loss_epoch": best_loss_epoch,
-                "varlen": args.varlen,
-                "mode": "varlen" if args.varlen else "fixed",
-                "vocab_size": args.vocab_size,
-                "maxlen": args.maxlen,
-                "embed_dim": embed_dim,
-                "hidden_size": args.hidden_size,
-            }
-            best_path = os.path.join(args.ckpt_dir, f"{args.model_name}.pth")
-            torch.save(ckpt_payload, best_path)
-
         # Report full-catalog collision rate at the evaluation interval.
         if epoch % args.eval_step == 0:
             graph.eval()
@@ -299,9 +276,8 @@ def main():
                 f"[dVAE] Epoch {epoch:4d}/{args.epochs} | "
                 f"CollisionRate: {collision_rate:.6f} ({num_items - len(unique_codes)}/{num_items})"
             )
-            if collision_rate < best_collision_rate:
-                best_collision_rate = collision_rate
-                best_collision_epoch = epoch
+            last_collision_rate = collision_rate
+            last_collision_epoch = epoch
 
     # Save final model
     final_payload = {
@@ -309,6 +285,8 @@ def main():
         "args": vars(args),
         "state_dict": graph.state_dict(),
         "final_loss": avg_loss,
+        "final_collision_rate": last_collision_rate,
+        "collision_rate_epoch": last_collision_epoch,
         "varlen": args.varlen,
         "mode": "varlen" if args.varlen else "fixed",
         "vocab_size": args.vocab_size,
@@ -316,11 +294,17 @@ def main():
         "embed_dim": embed_dim,
         "hidden_size": args.hidden_size,
     }
-    final_path = os.path.join(args.ckpt_dir, f"{args.model_name}_last.pth")
+    final_path = os.path.join(args.ckpt_dir, f"{args.model_name}.pth")
     torch.save(final_payload, final_path)
-    print(f"[dVAE] Training complete! Best checkpoint saved to {os.path.join(args.ckpt_dir, args.model_name + '.pth')}")
-    print(f"[dVAE] Best training loss: {best_loss:.4f} at epoch {best_loss_epoch}")
-    print(f"[dVAE] Best collision rate: {best_collision_rate:.6f} at epoch {best_collision_epoch}")
+    last_path = os.path.join(args.ckpt_dir, f"{args.model_name}_last.pth")
+    torch.save(final_payload, last_path)
+    print(f"[dVAE] Training complete! Final model saved to {final_path}")
+    print(f"[dVAE] Final training loss: {avg_loss:.4f} at epoch {args.epochs}")
+    if last_collision_rate is not None:
+        print(
+            f"[dVAE] Last collision rate: {last_collision_rate:.6f} "
+            f"at epoch {last_collision_epoch}"
+        )
 
 
 if __name__ == "__main__":

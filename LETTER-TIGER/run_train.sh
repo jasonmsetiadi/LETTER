@@ -12,5 +12,6 @@ torchrun --nproc_per_node=2 --master_port=2314 ./finetune.py \
     --learning_rate 5e-4 \
     --epochs 200 \
     --save_and_eval_strategy epoch \
+    --save_and_eval_steps 2 \
     --index_file .index.json \
     --temperature 1.0
