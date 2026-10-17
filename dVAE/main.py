@@ -145,6 +145,10 @@ def main():
     # Ramp beta to beta_end over the first 20% of training, then hold it there.
     schedule_steps = max(1, int(total_steps * 0.2))
     global_step = 0
+    best_loss = float("inf")
+    best_loss_epoch = None
+    best_collision_rate = float("inf")
+    best_collision_epoch = None
     last_collision_rate = None
     last_collision_epoch = None
     os.makedirs(args.ckpt_dir, exist_ok=True)
@@ -211,6 +215,9 @@ def main():
             global_step += 1
 
         avg_loss = float(sum(epoch_losses) / max(len(epoch_losses), 1))
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+            best_loss_epoch = epoch
         avg_recon = float(sum(epoch_recon) / max(len(epoch_recon), 1))
         avg_kl = float(sum(epoch_kl) / max(len(epoch_kl), 1))
         avg_beta = float(beta)
@@ -278,6 +285,9 @@ def main():
             )
             last_collision_rate = collision_rate
             last_collision_epoch = epoch
+            if collision_rate < best_collision_rate:
+                best_collision_rate = collision_rate
+                best_collision_epoch = epoch
 
     # Save final model
     final_payload = {
@@ -287,6 +297,10 @@ def main():
         "final_loss": avg_loss,
         "final_collision_rate": last_collision_rate,
         "collision_rate_epoch": last_collision_epoch,
+        "best_loss": best_loss,
+        "best_loss_epoch": best_loss_epoch,
+        "best_collision_rate": best_collision_rate if best_collision_epoch is not None else None,
+        "best_collision_epoch": best_collision_epoch,
         "varlen": args.varlen,
         "mode": "varlen" if args.varlen else "fixed",
         "vocab_size": args.vocab_size,
@@ -300,10 +314,15 @@ def main():
     torch.save(final_payload, last_path)
     print(f"[dVAE] Training complete! Final model saved to {final_path}")
     print(f"[dVAE] Final training loss: {avg_loss:.4f} at epoch {args.epochs}")
+    print(f"[dVAE] Lowest training loss: {best_loss:.4f} at epoch {best_loss_epoch} (diagnostic only)")
     if last_collision_rate is not None:
         print(
             f"[dVAE] Last collision rate: {last_collision_rate:.6f} "
             f"at epoch {last_collision_epoch}"
+        )
+        print(
+            f"[dVAE] Lowest collision rate: {best_collision_rate:.6f} "
+            f"at epoch {best_collision_epoch} (diagnostic only)"
         )
 
 
