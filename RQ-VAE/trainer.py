@@ -258,6 +258,8 @@ class Trainer(object):
         indices_set = set()
 
         num_sample = 0
+        total_valid_loss = 0.0
+        num_batches = 0
         if getattr(self.model, "beta", 0) > 0:
             embs  = [layer.embedding.weight.cpu().detach().numpy() for layer in self.model.rq.vq_layers]
             for idx, emb in enumerate(embs):
@@ -269,6 +271,41 @@ class Trainer(object):
             data, emb_idx = data[0], data[1]
             num_sample += len(data)
             data = data.to(self.device)
+            num_batches += 1
+
+            # Compute validation loss with fixed weights and the same objective
+            # used during training.
+            if self.phase == 2.0:
+                out, rq_loss, _, dense_out, stop_probs, survival_probs, _ = self.model(
+                    data,
+                    self.labels,
+                    return_lengths=True,
+                )
+                valid_loss = self.model.compute_loss(
+                    out,
+                    rq_loss,
+                    emb_idx,
+                    dense_out,
+                    xs=data,
+                    stop_probs=stop_probs,
+                    survival_probs=survival_probs,
+                )[0]
+            else:
+                lengths = None
+                if self.target_lengths is not None:
+                    lengths = self.target_lengths[emb_idx.to(self.device)]
+                out, rq_loss, _, dense_out, _ = self.model(
+                    data,
+                    self.labels,
+                    lengths=lengths,
+                    residual_threshold=self.residual_threshold,
+                    min_length=self.min_length,
+                    return_lengths=True,
+                )
+                valid_loss = self.model.compute_loss(
+                    out, rq_loss, emb_idx, dense_out, xs=data
+                )[0]
+            total_valid_loss += float(valid_loss.item())
 
             if self.phase == 2.0:
                 indices, pred_lengths = self.model.get_indices(data, self.labels, return_lengths=True)
@@ -311,7 +348,8 @@ class Trainer(object):
             avg_len = sum(all_pred_lens) / len(all_pred_lens)
             self.logger.info(f"[Phase 2.0 Validation] Mean length: {avg_len:.3f}, Distribution: {len_dist}")
 
-        return collision_rate
+        avg_valid_loss = total_valid_loss / max(num_batches, 1)
+        return collision_rate, avg_valid_loss
 
     def _save_checkpoint(self, epoch, collision_rate=1, ckpt_file=None):
 
@@ -418,7 +456,7 @@ class Trainer(object):
             # eval
             if (epoch_idx + 1) % self.eval_step == 0:
                 valid_start_time = time()
-                collision_rate = self._valid_epoch(data)
+                collision_rate, valid_loss = self._valid_epoch(data)
 
                 if collision_rate < self.best_collision_rate:
                     self.best_collision_rate = collision_rate
@@ -439,8 +477,10 @@ class Trainer(object):
                     + set_color("time", "blue")
                     + ": %.2fs, "
                     + set_color("collision_rate", "blue")
-                    + ": %f]"
-                ) % (epoch_idx + 1, valid_end_time - valid_start_time, collision_rate)
+                    + ": %f, "
+                    + set_color("validation loss", "blue")
+                    + ": %.4f]"
+                ) % (epoch_idx + 1, valid_end_time - valid_start_time, collision_rate, valid_loss)
 
                 self.logger.info(valid_score_output)
 

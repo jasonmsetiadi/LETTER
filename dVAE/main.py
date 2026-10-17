@@ -48,7 +48,7 @@ def parse_args():
 
     # Variable-length mechanism arguments
     parser.add_argument("--varlen", action="store_true", default=False, help="Enable variable-length hazard stopping mechanism")
-    parser.add_argument("--length_cost", type=float, default=5.0, help="Length rate penalty weight (gamma) for variable length")
+    parser.add_argument("--length_cost", type=float, default=3.0, help="Length rate penalty weight (gamma) for variable length")
     parser.add_argument("--length_selection_mode", type=str, default="argmax", choices=["argmax", "mean", "median"], help="Inference length mode")
 
     # Training hyperparameters
@@ -65,7 +65,7 @@ def parse_args():
 
     # Environment
     parser.add_argument("--device", type=str, default="cuda:0" if torch.cuda.is_available() else "cpu", help="Device (e.g. cuda:0 or cpu)")
-    parser.add_argument("--eval_step", type=int, default=100, help="Epoch interval to log and evaluate")
+    parser.add_argument("--eval_step", type=int, default=2000, help="Epoch interval to log and evaluate")
     parser.add_argument("--ckpt_dir", type=str, default="./dVAE/ckpt", help="Directory to save model checkpoints")
     parser.add_argument("--model_name", type=str, default="best_loss_model", help="Checkpoint filename stem")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
@@ -145,7 +145,7 @@ def main():
     # Ramp beta to beta_end over the first 20% of training, then hold it there.
     schedule_steps = max(1, int(total_steps * 0.2))
     global_step = 0
-    best_loss = float("inf")
+    best_val_loss = float("inf")
     os.makedirs(args.ckpt_dir, exist_ok=True)
 
     free_bits_t = torch.tensor(args.free_bits, device=device) if args.free_bits is not None else None
@@ -239,24 +239,50 @@ def main():
             if recon_depth_batches else ""
         )
 
-        if epoch % args.eval_step == 0 or epoch == args.epochs or epoch == 1:
+        should_evaluate = epoch % args.eval_step == 0 or epoch == args.epochs or epoch == 1
+        val_loss = None
+        if should_evaluate:
+            graph.eval()
+            val_losses = []
+            with torch.no_grad():
+                val_tau = get_cosine_schedule(global_step, args.tau_start, args.tau_end, schedule_steps)
+                val_beta = get_cosine_schedule(global_step, args.beta_start, args.beta_end, schedule_steps)
+                val_beta_t = torch.tensor(val_beta, device=device)
+                for batch_x, batch_idx in dataloader:
+                    batch_x = batch_x.to(device)
+                    batch_cf = cf_tensors[batch_idx].to(device) if cf_tensors is not None else None
+                    val_kwargs: Dict[str, Any] = {
+                        "x": batch_x,
+                        "tau": val_tau,
+                        "beta": val_beta_t,
+                        "free_bits": free_bits_t,
+                        "cf_emb": batch_cf,
+                    }
+                    if args.varlen:
+                        val_kwargs["length_cost"] = length_cost_t
+                    val_batch_loss, _ = graph(**val_kwargs)
+                    val_losses.append(val_batch_loss.item())
+            val_loss = float(sum(val_losses) / max(len(val_losses), 1))
+
+        if should_evaluate:
             print(
                 f"[dVAE] Epoch {epoch:4d}/{args.epochs} | Tau: {tau:.3f} | Beta: {avg_beta:.6f} | "
                 f"Loss: {avg_loss:.4f} | "
                 f"Recon: {avg_recon:.4f} | VocabLoss: {avg_vocab_loss:.4f} | VocabKL: {avg_kl:.4f}"
-                f"{avg_kl_length_str}{avg_len_str}{avg_entropy_str}"
+                f" | ValLoss: {val_loss:.4f}{avg_kl_length_str}{avg_len_str}{avg_entropy_str}"
                 f"{length_dist_str}{recon_depth_str}"
             )
 
         # Checkpoint saving
-        is_best = avg_loss < best_loss
+        is_best = val_loss is not None and val_loss < best_val_loss
         if is_best:
-            best_loss = avg_loss
+            best_val_loss = val_loss
             ckpt_payload = {
                 "epoch": epoch,
                 "args": vars(args),
                 "state_dict": graph.state_dict(),
-                "best_loss": best_loss,
+                "best_loss": avg_loss,
+                "best_val_loss": best_val_loss,
                 "varlen": args.varlen,
                 "mode": "varlen" if args.varlen else "fixed",
                 "vocab_size": args.vocab_size,
@@ -273,6 +299,7 @@ def main():
         "args": vars(args),
         "state_dict": graph.state_dict(),
         "final_loss": avg_loss,
+        "final_val_loss": val_loss,
         "varlen": args.varlen,
         "mode": "varlen" if args.varlen else "fixed",
         "vocab_size": args.vocab_size,
