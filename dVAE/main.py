@@ -142,7 +142,8 @@ def main():
     )
 
     total_steps = args.epochs * len(dataloader)
-    schedule_steps = len(dataloader)
+    # Ramp beta to beta_end over the first 20% of training, then hold it there.
+    schedule_steps = max(1, int(total_steps * 0.2))
     global_step = 0
     best_loss = float("inf")
     os.makedirs(args.ckpt_dir, exist_ok=True)
@@ -211,12 +212,15 @@ def main():
         avg_loss = float(sum(epoch_losses) / max(len(epoch_losses), 1))
         avg_recon = float(sum(epoch_recon) / max(len(epoch_recon), 1))
         avg_kl = float(sum(epoch_kl) / max(len(epoch_kl), 1))
+        avg_beta = float(beta)
+        avg_vocab_loss = avg_beta * avg_kl
         avg_len_str = f" | ExpLen: {sum(epoch_exp_len) / len(epoch_exp_len):.2f}" if epoch_exp_len else ""
         avg_entropy_str = (
             f" | LenEntropy: {sum(epoch_length_entropy) / len(epoch_length_entropy):.4f}"
             if epoch_length_entropy else ""
         )
         avg_kl_length_str = (
+            f" | LengthLoss: {avg_beta * (sum(epoch_kl_length) / len(epoch_kl_length)):.4f}"
             f" | KL_length: {sum(epoch_kl_length) / len(epoch_kl_length):.4f}"
             if epoch_kl_length else ""
         )
@@ -237,8 +241,9 @@ def main():
 
         if epoch % args.eval_step == 0 or epoch == args.epochs or epoch == 1:
             print(
-                f"[dVAE] Epoch {epoch:4d}/{args.epochs} | Loss: {avg_loss:.4f} | "
-                f"Recon: {avg_recon:.4f} | KL: {avg_kl:.4f}{avg_len_str} | Tau: {tau:.3f}"
+                f"[dVAE] Epoch {epoch:4d}/{args.epochs} | Beta: {avg_beta:.6f} | Loss: {avg_loss:.4f} | "
+                f"Recon: {avg_recon:.4f} | VocabLoss: {avg_vocab_loss:.4f} | VocabKL: {avg_kl:.4f}"
+                f"{avg_len_str} | Tau: {tau:.3f}"
                 f"{avg_entropy_str}{avg_kl_length_str}{length_dist_str}{recon_depth_str}"
             )
 
