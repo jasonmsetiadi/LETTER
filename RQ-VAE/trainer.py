@@ -372,7 +372,7 @@ class Trainer(object):
         if quant_loss is not None:
             train_loss_output += ", " + set_color("quantization loss", "blue") + ": %.4f" % quant_loss
         if rate_loss is not None:
-            train_loss_output += ", " + set_color("rate loss", "blue") + ": %.4f" % rate_loss
+            train_loss_output += ", " + set_color("length loss", "blue") + ": %.4f" % rate_loss
         if expected_len is not None:
             train_loss_output += ", " + set_color("expected len", "blue") + ": %.3f" % expected_len
         if entropy is not None:
