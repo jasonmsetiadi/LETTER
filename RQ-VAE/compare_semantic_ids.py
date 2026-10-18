@@ -722,6 +722,10 @@ def evaluate_semantic_ids(
             signal = strat.split(":", 1)[1]
             strat_suffix = {"frequency": ".pop", "user_entropy": ".pop-entropy", "pagerank": ".pop-pagerank", "co_occurrence": ".pop-cooccur", "cf_density": ".pop-cf"}.get(signal, f".pop-{signal}")
         index_path = tok_dir / f"{dataset}.index.varlen{strat_suffix}-phase2{var_tag}.json"
+        if not index_path.exists() and tokenizer == "dvae" and strat in ("khrylchenko", "shortest_unique"):
+            dvae_phase2 = tok_dir / f"{dataset}.index.dvae.varlen-phase2{var_tag}.json"
+            if dvae_phase2.exists():
+                index_path = dvae_phase2
         if not index_path.exists() and strat in ("khrylchenko", "shortest_unique"):
             fallback = tok_dir / f"{dataset}.index.varlen-phase2{var_tag}.json"
             if fallback.exists():
