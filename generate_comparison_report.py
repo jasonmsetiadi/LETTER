@@ -827,6 +827,11 @@ def generate_report_for_max_length(
                 os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}{ph_file_tag}{var_t}.json"),
                 os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}{ph_file_tag}{var_t}.json"),
             ])
+        if tokenizer == "dvae" and strat == "khrylchenko" and ph == "2":
+            cands.extend([
+                os.path.join(tok_d, f"{dataset}.index.dvae.varlen-phase2{var_t}.json"),
+                os.path.join(ds_d, f"{dataset}.index.dvae.varlen-phase2{var_t}.json"),
+            ])
         if max_length == 4 and min_length == 1:
             cands.extend([
                 os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}{ph_tag}.json"),
@@ -839,6 +844,11 @@ def generate_report_for_max_length(
                 cands.extend([
                     os.path.join(tok_d, f"{dataset}.index.varlen{strat_sfx}{ph_file_tag}.json"),
                     os.path.join(ds_d, f"{dataset}.index.varlen{strat_sfx}{ph_file_tag}.json"),
+                ])
+            if tokenizer == "dvae" and strat == "khrylchenko" and ph == "2":
+                cands.extend([
+                    os.path.join(tok_d, f"{dataset}.index.dvae.varlen-phase2.json"),
+                    os.path.join(ds_d, f"{dataset}.index.dvae.varlen-phase2.json"),
                 ])
         return any(os.path.isfile(c) for c in cands)
 

@@ -826,7 +826,11 @@ else
   fi
 
   if [[ "$TOK_NAME" == "dvae" ]]; then
-    DEF_VAR_NAME="$DATASET.index.dvae.varlen${VAR_TAG}.json"
+    if [[ "$PHASE" == "2" ]]; then
+      DEF_VAR_NAME="$DATASET.index.dvae.varlen-phase2${VAR_TAG}.json"
+    else
+      DEF_VAR_NAME="$DATASET.index.dvae.varlen${VAR_TAG}.json"
+    fi
   elif [[ "$PHASE" == "2" ]]; then
     DEF_VAR_NAME="$DATASET.index.varlen-${STRATEGY}-phase2${VAR_TAG}.json"
     if [[ "$RESUME" == true && ! -f "$TOK_INDEX_DIR/$DEF_VAR_NAME" && -f "$TOK_INDEX_DIR/$DATASET.index.varlen-phase2${VAR_TAG}.json" ]]; then
