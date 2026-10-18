@@ -1,0 +1,21 @@
+{
+  "output": "/srv/scratch/z5611110/LETTER/data/Beauty/dvae/Beauty.index.dvae.varlen.max10.json",
+  "tokenizer": "dvae",
+  "varlen": true,
+  "length_mode": "argmax",
+  "items": 12101,
+  "min_length": 2,
+  "max_length": 8,
+  "mean_length": 4.595074787207669,
+  "length_distribution": {
+    "2": 580,
+    "3": 1827,
+    "4": 2562,
+    "5": 4352,
+    "6": 2510,
+    "7": 264,
+    "8": 6
+  },
+  "unique_ids": 12101,
+  "raw_collisions": 971
+}

@@ -1,0 +1,20 @@
+{
+  "output": "/srv/scratch/z5611110/LETTER/data/Instruments/dvae/Instruments.index.dvae.varlen.max10.json",
+  "tokenizer": "dvae",
+  "varlen": true,
+  "length_mode": "argmax",
+  "items": 9922,
+  "min_length": 2,
+  "max_length": 7,
+  "mean_length": 3.217194114089901,
+  "length_distribution": {
+    "2": 2214,
+    "3": 4467,
+    "4": 2206,
+    "5": 945,
+    "6": 87,
+    "7": 3
+  },
+  "unique_ids": 9922,
+  "raw_collisions": 2722
+}
